@@ -1,0 +1,307 @@
+import sqlite3
+from pathlib import Path
+from typing import Optional
+
+from backend.models import (
+    BoundingBox, Category, FrameAnnotation, FrameStatus, Occlusion,
+)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_path TEXT NOT NULL,
+    source TEXT NOT NULL,
+    match_round TEXT NOT NULL,
+    opponent TEXT,
+    weather TEXT NOT NULL,
+    lighting TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_opened TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS frames (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    original_filename TEXT NOT NULL,
+    image_width INTEGER,
+    image_height INTEGER,
+    -- Frame-level metadata (6 dimensions)
+    shot_type TEXT DEFAULT 'wide',
+    camera_motion TEXT DEFAULT 'static',
+    ball_status TEXT DEFAULT 'visible',
+    game_situation TEXT DEFAULT 'open_play',
+    pitch_zone TEXT DEFAULT 'middle_third',
+    frame_quality TEXT DEFAULT 'clean',
+    -- State
+    status TEXT DEFAULT 'unviewed',
+    exported_filename TEXT,
+    sort_order INTEGER,
+    UNIQUE(session_id, original_filename)
+);
+
+CREATE TABLE IF NOT EXISTS boxes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    frame_id INTEGER NOT NULL REFERENCES frames(id) ON DELETE CASCADE,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    category INTEGER NOT NULL,
+    jersey_number INTEGER,
+    player_name TEXT,
+    occlusion TEXT DEFAULT 'visible',
+    truncated INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_frames_session ON frames(session_id);
+CREATE INDEX IF NOT EXISTS idx_frames_status ON frames(status);
+CREATE INDEX IF NOT EXISTS idx_boxes_frame ON boxes(frame_id);
+"""
+
+
+class DatabaseManager:
+    def __init__(self, db_path: str | Path = "annotations.db"):
+        self.db_path = str(db_path)
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.row_factory = sqlite3.Row
+        self._init_schema()
+
+    def _init_schema(self):
+        self.conn.executescript(SCHEMA)
+        self._migrate()
+        self.conn.commit()
+
+    def _migrate(self):
+        """Add columns that may not exist in older databases."""
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        for col, default in [("opponent", "''"), ("weather", "'clear'"), ("lighting", "'floodlight'")]:
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT DEFAULT {default}")
+
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(frames)").fetchall()}
+        for col, default in [
+            ("ball_status", "'visible'"), ("game_situation", "'open_play'"),
+            ("pitch_zone", "'middle_third'"), ("frame_quality", "'clean'"),
+        ]:
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE frames ADD COLUMN {col} TEXT DEFAULT {default}")
+        # Rename old columns if they exist
+        if "ball_visible" in existing and "ball_status" not in existing:
+            self.conn.execute("ALTER TABLE frames ADD COLUMN ball_status TEXT DEFAULT 'visible'")
+
+    def close(self):
+        self.conn.close()
+
+    # ── Session operations ──
+
+    def create_session(self, folder_path: str, source: str, match_round: str,
+                       opponent: str = "", weather: str = "clear",
+                       lighting: str = "floodlight") -> int:
+        cur = self.conn.execute(
+            "INSERT INTO sessions (folder_path, source, match_round, opponent, "
+            "weather, lighting, last_opened) "
+            "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (folder_path, source, match_round, opponent, weather, lighting),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def find_session_by_folder(self, folder_path: str) -> Optional[int]:
+        row = self.conn.execute(
+            "SELECT id FROM sessions WHERE folder_path = ? ORDER BY created_at DESC LIMIT 1",
+            (folder_path,),
+        ).fetchone()
+        return row["id"] if row else None
+
+    def get_session(self, session_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row:
+            self.conn.execute(
+                "UPDATE sessions SET last_opened = CURRENT_TIMESTAMP WHERE id = ?",
+                (session_id,),
+            )
+            self.conn.commit()
+            return dict(row)
+        return None
+
+    # ── Frame operations ──
+
+    def add_frame(self, session_id: int, filename: str, sort_order: int,
+                  image_width: int = 0, image_height: int = 0) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO frames (session_id, original_filename, sort_order, "
+            "image_width, image_height) VALUES (?, ?, ?, ?, ?)",
+            (session_id, filename, sort_order, image_width, image_height),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_frame(self, frame_id: int) -> Optional[FrameAnnotation]:
+        row = self.conn.execute(
+            "SELECT f.*, s.source, s.match_round, s.opponent, s.weather, s.lighting "
+            "FROM frames f JOIN sessions s ON f.session_id = s.id WHERE f.id = ?",
+            (frame_id,),
+        ).fetchone()
+        if not row:
+            return None
+        frame = self._row_to_frame(row)
+        frame.boxes = self.get_boxes(frame_id)
+        return frame
+
+    def get_session_frames(self, session_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, original_filename, status, sort_order FROM frames "
+            "WHERE session_id = ? ORDER BY sort_order",
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_frame_metadata(self, frame_id: int, **kwargs):
+        allowed = {"shot_type", "camera_motion", "ball_status",
+                    "game_situation", "pitch_zone", "frame_quality"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        self.conn.execute(
+            f"UPDATE frames SET {set_clause} WHERE id = ?",
+            (*updates.values(), frame_id),
+        )
+        self.conn.commit()
+
+    def set_frame_status(self, frame_id: int, status: FrameStatus):
+        self.conn.execute(
+            "UPDATE frames SET status = ? WHERE id = ?",
+            (status.value, frame_id),
+        )
+        self.conn.commit()
+
+    def set_frame_dimensions(self, frame_id: int, width: int, height: int):
+        self.conn.execute(
+            "UPDATE frames SET image_width = ?, image_height = ? WHERE id = ?",
+            (width, height, frame_id),
+        )
+        self.conn.commit()
+
+    def set_exported_filename(self, frame_id: int, filename: str):
+        self.conn.execute(
+            "UPDATE frames SET exported_filename = ? WHERE id = ?",
+            (filename, frame_id),
+        )
+        self.conn.commit()
+
+    # ── Box operations ──
+
+    def add_box(self, frame_id: int, x: int, y: int, width: int, height: int,
+                category: Category, jersey_number: Optional[int] = None,
+                player_name: Optional[str] = None,
+                occlusion: Occlusion = Occlusion.VISIBLE,
+                truncated: bool = False) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO boxes (frame_id, x, y, width, height, category, "
+            "jersey_number, player_name, occlusion, truncated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (frame_id, x, y, width, height, category.value,
+             jersey_number, player_name, occlusion.value, int(truncated)),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_box(self, box_id: int, **kwargs):
+        allowed = {"x", "y", "width", "height", "category", "jersey_number",
+                    "player_name", "occlusion", "truncated"}
+        updates = {}
+        for k, v in kwargs.items():
+            if k not in allowed:
+                continue
+            if k == "category" and isinstance(v, Category):
+                v = v.value
+            elif k == "occlusion" and isinstance(v, Occlusion):
+                v = v.value
+            elif k == "truncated" and isinstance(v, bool):
+                v = int(v)
+            updates[k] = v
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        self.conn.execute(
+            f"UPDATE boxes SET {set_clause} WHERE id = ?",
+            (*updates.values(), box_id),
+        )
+        self.conn.commit()
+
+    def delete_box(self, box_id: int):
+        self.conn.execute("DELETE FROM boxes WHERE id = ?", (box_id,))
+        self.conn.commit()
+
+    def get_boxes(self, frame_id: int) -> list[BoundingBox]:
+        rows = self.conn.execute(
+            "SELECT * FROM boxes WHERE frame_id = ? ORDER BY created_at",
+            (frame_id,),
+        ).fetchall()
+        return [self._row_to_box(r) for r in rows]
+
+    # ── Stats ──
+
+    def get_session_stats(self, session_id: int) -> dict:
+        rows = self.conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM frames "
+            "WHERE session_id = ? GROUP BY status",
+            (session_id,),
+        ).fetchall()
+        stats = {"total": 0, "annotated": 0, "skipped": 0, "unviewed": 0, "in_progress": 0}
+        for r in rows:
+            stats[r["status"]] = r["cnt"]
+            stats["total"] += r["cnt"]
+        return stats
+
+    def get_next_seq(self, session_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) as cnt FROM frames "
+            "WHERE session_id = ? AND status = 'annotated'",
+            (session_id,),
+        ).fetchone()
+        return row["cnt"] + 1
+
+    # ── Helpers ──
+
+    def _row_to_frame(self, row) -> FrameAnnotation:
+        return FrameAnnotation(
+            id=row["id"],
+            original_filename=row["original_filename"],
+            image_width=row["image_width"] or 0,
+            image_height=row["image_height"] or 0,
+            source=row["source"],
+            match_round=row["match_round"],
+            opponent=row["opponent"] or "",
+            weather=row["weather"] or "clear",
+            lighting=row["lighting"] or "floodlight",
+            shot_type=row["shot_type"],
+            camera_motion=row["camera_motion"],
+            ball_status=row["ball_status"] if "ball_status" in row.keys() else "visible",
+            game_situation=row["game_situation"] if "game_situation" in row.keys() else "open_play",
+            pitch_zone=row["pitch_zone"] if "pitch_zone" in row.keys() else "middle_third",
+            frame_quality=row["frame_quality"] if "frame_quality" in row.keys() else "clean",
+            status=FrameStatus(row["status"]),
+            exported_filename=row["exported_filename"],
+        )
+
+    def _row_to_box(self, row) -> BoundingBox:
+        return BoundingBox(
+            id=row["id"],
+            frame_id=row["frame_id"],
+            x=row["x"],
+            y=row["y"],
+            width=row["width"],
+            height=row["height"],
+            category=Category(row["category"]),
+            jersey_number=row["jersey_number"],
+            player_name=row["player_name"],
+            occlusion=Occlusion(row["occlusion"]) if row["occlusion"] else Occlusion.VISIBLE,
+            truncated=bool(row["truncated"]),
+        )

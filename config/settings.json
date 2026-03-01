@@ -1,0 +1,15 @@
+{
+  "window": {
+    "default_width": 1600,
+    "default_height": 900,
+    "min_width": 1200,
+    "min_height": 700
+  },
+  "paths": {
+    "roster": "config/roster.json",
+    "database": "annotations.db"
+  },
+  "canvas": {
+    "min_box_size": 5
+  }
+}
