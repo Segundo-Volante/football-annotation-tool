@@ -33,7 +33,7 @@ class AnnotationPanel(QWidget):
 
         self._title = QLabel(t("panel.annotations_title"))
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("color: #EEE; font-weight: bold; font-size: 13px;")
+        self._title.setStyleSheet("color: #E8E8F0; font-weight: bold; font-size: 13px;")
         layout.addWidget(self._title)
 
         # Pending counter (visible only in AI mode when pending boxes exist)
@@ -47,7 +47,7 @@ class AnnotationPanel(QWidget):
 
         self._list = QListWidget()
         self._list.setStyleSheet("""
-            QListWidget { background: #2A2A2A; border: none; }
+            QListWidget { background: #2A2A3C; border: 1px solid #404060; border-radius: 4px; }
             QListWidget::item { padding: 4px; border-radius: 3px; margin: 1px; }
             QListWidget::item:selected { background: #3A5A3A; border: 1px solid #5A5; }
         """)
@@ -68,12 +68,12 @@ class AnnotationPanel(QWidget):
         # ── Keyboard shortcut reference ──
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #555;")
+        sep.setStyleSheet("color: #404060;")
         layout.addWidget(sep)
 
         self._help_label = QLabel()
         self._help_label.setWordWrap(True)
-        self._help_label.setStyleSheet("color: #999; font-size: 11px; padding: 4px;")
+        self._help_label.setStyleSheet("color: #8888A0; font-size: 11px; padding: 4px;")
         layout.addWidget(self._help_label)
 
         self._update_help_text()

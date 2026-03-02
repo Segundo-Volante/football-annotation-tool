@@ -24,7 +24,8 @@ DARK_STYLE = """
     QLabel { color: #E8E8F0; font-size: 12px; }
     QLineEdit, QComboBox, QSpinBox {
         background: #2A2A3C; color: #E8E8F0; border: 1px solid #404060;
-        border-radius: 4px; padding: 6px; font-size: 12px;
+        border-radius: 4px; padding: 10px 10px; font-size: 14px;
+        min-height: 20px;
     }
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: #F5A623; }
     QLineEdit:read-only {
@@ -65,15 +66,9 @@ ACCENT_BTN_STYLE = """
     QPushButton:disabled { background: #555560; color: #888890; }
 """
 
-CARD_STYLE = """
-    QFrame {{
-        background: #2A2A3C; border: 2px solid {border};
-        border-radius: 8px; padding: 16px;
-    }}
-    QFrame:hover {{
-        border-color: #F5A623; background: #2E2E42;
-    }}
-"""
+# Inline style strings — NO QFrame selector to avoid cascading to children
+_CARD_INLINE = "background: #2A2A3C; border: 2px solid {border}; border-radius: 8px;"
+_CARD_INLINE_HOVER = "background: #2E2E42; border: 2px solid #F5A623; border-radius: 8px;"
 
 DANGER_BTN_STYLE = """
     QPushButton {
@@ -144,7 +139,7 @@ class GitSetupDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Git Collaboration Setup")
-        self.setFixedSize(560, 520)
+        self.setFixedSize(620, 680)
         self.setStyleSheet(DARK_STYLE)
 
         self._result: dict = {}
@@ -170,15 +165,19 @@ class GitSetupDialog(QDialog):
         # Identity fields
         identity_group = QGroupBox("Your Identity (used for git commits)")
         id_layout = QVBoxLayout(identity_group)
+        id_layout.setContentsMargins(14, 20, 14, 14)
+        id_layout.setSpacing(8)
 
         id_layout.addWidget(_make_section_label("Your name"))
         self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("e.g. Jason Liu")
+        self._name_input.setPlaceholderText("e.g. John Smith")
+        self._name_input.setMinimumHeight(38)
         id_layout.addWidget(self._name_input)
 
         id_layout.addWidget(_make_section_label("Email"))
         self._email_input = QLineEdit()
-        self._email_input.setPlaceholderText("e.g. jason@example.com")
+        self._email_input.setPlaceholderText("e.g. JohnSmith@example.com")
+        self._email_input.setMinimumHeight(38)
         id_layout.addWidget(self._email_input)
 
         layout.addWidget(identity_group)
@@ -225,35 +224,46 @@ class GitSetupDialog(QDialog):
     # ── Helpers ──
 
     def _prefill_identity(self):
-        """Try to read name/email from global git config."""
-        ok_name, name = _run_git(["config", "--global", "user.name"])
-        if ok_name and name:
-            self._name_input.setText(name)
-        ok_email, email = _run_git(["config", "--global", "user.email"])
-        if ok_email and email:
-            self._email_input.setText(email)
+        """Pre-fill name/email with demo defaults.
+
+        Uses placeholder names so the user's real git identity is never
+        exposed in screenshots or demos.
+        """
+        self._name_input.setText("John Smith")
+        self._email_input.setText("JohnSmith@example.com")
 
     def _make_option_card(self, title: str, description: str,
                           callback) -> QFrame:
         """Build a clickable option card."""
         card = QFrame()
-        card.setStyleSheet(CARD_STYLE.format(border="#404060"))
+        default_style = _CARD_INLINE.format(border="#404060")
+        hover_style = _CARD_INLINE_HOVER
+        card.setStyleSheet(default_style)
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setFixedHeight(62)
+        card.setMinimumHeight(86)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(12, 8, 12, 8)
-        card_layout.setSpacing(2)
+        card_layout.setContentsMargins(16, 14, 16, 14)
+        card_layout.setSpacing(6)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: #E8E8F0; font-size: 13px; font-weight: bold; background: transparent; border: none;")
+        title_lbl.setStyleSheet(
+            "color: #E8E8F0; font-size: 15px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
         card_layout.addWidget(title_lbl)
 
         desc_lbl = QLabel(description)
-        desc_lbl.setStyleSheet("color: #8888A0; font-size: 11px; background: transparent; border: none;")
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet(
+            "color: #8888A0; font-size: 13px; "
+            "background: transparent; border: none;"
+        )
         card_layout.addWidget(desc_lbl)
 
         card.mousePressEvent = lambda _event, cb=callback: cb()
+        card.enterEvent = lambda e, c=card, s=hover_style: c.setStyleSheet(s)
+        card.leaveEvent = lambda e, c=card, s=default_style: c.setStyleSheet(s)
         return card
 
     def _validate_identity(self) -> bool:

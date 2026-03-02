@@ -146,7 +146,7 @@ class SessionDialog(QDialog):
 
         # Roster info label (shows team + season after selecting CSV)
         self._roster_info = QLabel("")
-        self._roster_info.setStyleSheet("color: #4A90D9; font-size: 11px;")
+        self._roster_info.setStyleSheet("color: #F5A623; font-size: 11px;")
         layout.addWidget(self._roster_info)
 
         # Separator

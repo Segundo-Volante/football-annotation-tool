@@ -79,18 +79,11 @@ DIALOG_STYLE = f"""
     }}
 """
 
-CARD_STYLE = """
-    QFrame {{
-        background: {bg};
-        border: 2px solid {border_color};
-        border-radius: 8px;
-        padding: 12px;
-    }}
-    QFrame:hover {{
-        border-color: {accent};
-        background: {bg_hover};
-    }}
-"""
+CARD_STYLE_TEMPLATE = (
+    "background: {bg}; border: 2px solid {border_color}; "
+    "border-radius: 8px;"
+)
+CARD_HOVER_BG = BG_CARD_HOVER
 
 PRIMARY_BTN_STYLE = f"""
     QPushButton {{
@@ -127,19 +120,21 @@ CANCEL_BTN_STYLE = f"""
 
 # ---------------------------------------------------------------------------
 # Workflow card definitions
+# Uses plain-text icons for maximum cross-platform compatibility
+# (Windows + macOS + Linux).  Emoji can render inconsistently.
 # ---------------------------------------------------------------------------
 
 WORKFLOW_CARDS = [
     {
         "key": "solo",
-        "icon": "\U0001F464",
+        "icon": "\U0001F464",          # 👤
         "title": "Solo",
         "description": "One person annotates everything. Simplest setup.",
     },
     {
         "key": "split_merge",
-        "icon": "\U0001F4C2",
-        "title": "Split & Merge",
+        "icon": "\U0001F4C2",          # 📂
+        "title": "Split && Merge",
         "description": (
             "Divide frames among team members. Each person works on "
             "their own copy. Merge when done."
@@ -147,24 +142,30 @@ WORKFLOW_CARDS = [
     },
     {
         "key": "shared_folder",
-        "icon": "\u2601\uFE0F",
+        "icon": "\u2601\uFE0F",        # ☁️
         "title": "Shared Folder",
         "description": (
-            "Team shares one project folder. Everyone works on the "
-            "same folder, claiming different frames."
+            "Team shares one project folder via Google Drive, "
+            "OneDrive, or Dropbox. Claim frames to avoid conflicts."
         ),
     },
     {
         "key": "git",
-        "icon": "\U0001F500",
+        "icon": "\U0001F500",          # 🔀
         "title": "Git",
-        "description": "Version-controlled annotations. Best for developers.",
+        "description": (
+            "Version-controlled annotations with branching and merging. "
+            "Best for developers and technical teams."
+        ),
     },
     {
         "key": "custom",
-        "icon": "\u2699\uFE0F",
+        "icon": "\u2699\uFE0F",        # ⚙️
         "title": "Custom",
-        "description": "Full control. Configure everything yourself.",
+        "description": (
+            "Full control. View project structure, access all menu items, "
+            "and integrate with your own pipeline."
+        ),
     },
 ]
 
@@ -212,7 +213,12 @@ my_project/
 # ===================================================================
 
 class _WorkflowCard(QFrame):
-    """A single clickable workflow card."""
+    """A single clickable workflow card.
+
+    Renders an icon, bold title, and description text.  Uses explicit
+    per-widget stylesheets (not parent cascade) so that text is
+    visible on every OS (macOS, Windows, Linux).
+    """
 
     clicked = pyqtSignal(str)  # emits the workflow key
 
@@ -222,41 +228,39 @@ class _WorkflowCard(QFrame):
         self._selected = False
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(80)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(78)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Preferred)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(14)
 
-        # Icon
-        icon_label = QLabel(card_def["icon"])
-        icon_label.setStyleSheet("font-size: 24px; background: transparent; border: none;")
-        icon_label.setFixedWidth(36)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon_label)
+        # ── Icon (emoji — works on macOS & Windows 10+) ───────────
+        self._icon_label = QLabel(card_def["icon"])
+        self._icon_label.setFixedSize(40, 40)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._icon_label)
 
-        # Text column
+        # ── Text column ───────────────────────────────────────────
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(3)
+        text_col.setContentsMargins(0, 0, 0, 0)
 
-        title_label = QLabel(card_def["title"])
-        title_label.setStyleSheet(
-            f"font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY}; "
-            "background: transparent; border: none;"
-        )
-        text_col.addWidget(title_label)
+        self._title_label = QLabel(card_def["title"])
+        self._title_label.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                        QSizePolicy.Policy.Preferred)
+        text_col.addWidget(self._title_label)
 
-        desc_label = QLabel(card_def["description"])
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet(
-            f"font-size: 11px; color: {TEXT_SECONDARY}; "
-            "background: transparent; border: none;"
-        )
-        text_col.addWidget(desc_label)
+        self._desc_label = QLabel(card_def["description"])
+        self._desc_label.setWordWrap(True)
+        self._desc_label.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                       QSizePolicy.Policy.Preferred)
+        text_col.addWidget(self._desc_label)
 
         layout.addLayout(text_col, stretch=1)
 
+        # Apply initial style
         self._apply_style()
 
     # -- visual state -------------------------------------------------------
@@ -275,15 +279,41 @@ class _WorkflowCard(QFrame):
         self._apply_style()
 
     def _apply_style(self):
+        """Set styles directly on each widget — avoids parent-cascade issues."""
         border = BORDER_ACCENT if self._selected else BORDER_DEFAULT
+        # Card frame itself
         self.setStyleSheet(
-            CARD_STYLE.format(
-                bg=BG_CARD,
-                border_color=border,
-                accent=BORDER_ACCENT,
-                bg_hover=BG_CARD_HOVER,
-            )
+            CARD_STYLE_TEMPLATE.format(bg=BG_CARD, border_color=border)
         )
+        # Icon — large, transparent bg
+        self._icon_label.setStyleSheet(
+            "font-size: 26px; background: transparent; border: none;"
+        )
+        # Title — bold, primary color
+        self._title_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY}; "
+            "background: transparent; border: none;"
+        )
+        # Description — secondary color
+        self._desc_label.setStyleSheet(
+            f"font-size: 11px; color: {TEXT_SECONDARY}; "
+            "background: transparent; border: none;"
+        )
+
+    # -- hover effect -------------------------------------------------------
+
+    def enterEvent(self, event):
+        if not self._selected:
+            self.setStyleSheet(
+                CARD_STYLE_TEMPLATE.format(
+                    bg=CARD_HOVER_BG, border_color=BORDER_ACCENT
+                )
+            )
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._apply_style()
+        super().leaveEvent(event)
 
     # -- interaction --------------------------------------------------------
 
@@ -309,7 +339,8 @@ class WorkflowSelectionDialog(QDialog):
                  current_annotator: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Collaboration Workflow")
-        self.setFixedWidth(520)
+        self.setMinimumSize(560, 620)
+        self.resize(560, 660)
         self.setStyleSheet(DIALOG_STYLE)
 
         self._result: dict | None = None
@@ -352,11 +383,16 @@ class WorkflowSelectionDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
 
         card_container = QWidget()
+        card_container.setStyleSheet("background: transparent;")
         card_layout = QVBoxLayout(card_container)
-        card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(8)
+        card_layout.setContentsMargins(4, 4, 4, 4)
+        card_layout.setSpacing(10)
 
         self._cards: list[_WorkflowCard] = []
         for cdef in WORKFLOW_CARDS:

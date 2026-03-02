@@ -7,12 +7,57 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QGroupBox, QSpinBox, QMessageBox,
+    QHeaderView, QGroupBox, QSpinBox, QMessageBox, QFrame,
 )
 
 from backend.batch_operations import BatchOperations
 from backend.i18n import t
 from backend.models import Category, CATEGORY_NAMES, FrameStatus
+
+# ── Design tokens (unified with project palette) ──
+_BG = "#1E1E2E"
+_CARD = "#2A2A3C"
+_ELEVATED = "#33334C"
+_BORDER = "#404060"
+_ACCENT = "#F5A623"
+_ACCENT_HOVER = "#FFB833"
+_TEXT = "#E8E8F0"
+_MUTED = "#8888A0"
+_WARNING = "#D9C84A"
+_BTN_BG = "#404060"
+_BTN_HOVER = "#505070"
+
+_DIALOG_STYLE = f"""
+    QDialog {{ background: {_BG}; }}
+    QLabel {{ color: {_TEXT}; font-size: 12px; }}
+    QGroupBox {{
+        color: {_MUTED}; font-size: 11px; border: 1px solid {_BORDER};
+        border-radius: 6px; margin-top: 8px; padding-top: 16px;
+    }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
+    QLineEdit, QComboBox, QSpinBox {{
+        background: {_CARD}; color: {_TEXT}; border: 1px solid {_BORDER};
+        border-radius: 4px; padding: 6px; font-size: 12px;
+    }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {_ACCENT}; }}
+    QTableWidget {{
+        background: {_CARD}; color: {_TEXT};
+        gridline-color: {_BORDER}; border: 1px solid {_BORDER};
+        border-radius: 4px; font-size: 12px;
+    }}
+    QTableWidget::item {{ padding: 6px 8px; }}
+    QTableWidget::item:selected {{ background: #3A3A5C; }}
+    QHeaderView::section {{
+        background: {_ELEVATED}; color: {_MUTED}; padding: 6px 8px;
+        border: none; border-right: 1px solid {_BORDER};
+        font-size: 11px; font-weight: bold;
+    }}
+    QPushButton {{
+        background: {_BTN_BG}; color: {_TEXT}; padding: 8px 16px;
+        border-radius: 4px; font-size: 12px; border: none;
+    }}
+    QPushButton:hover {{ background: {_BTN_HOVER}; }}
+"""
 
 
 class ReviewPanel(QDialog):
@@ -25,31 +70,35 @@ class ReviewPanel(QDialog):
         self._ops = batch_ops
 
         self.setWindowTitle(t("review.title"))
-        self.setMinimumSize(700, 500)
-        self.resize(800, 550)
-        self.setStyleSheet("""
-            QDialog { background: #1E1E1E; }
-            QLabel { color: #EEE; }
-            QGroupBox { color: #CCC; border: 1px solid #444; border-radius: 6px;
-                        margin-top: 8px; padding-top: 16px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; }
-            QLineEdit, QComboBox, QSpinBox { background: #333; color: #EEE;
-                border: 1px solid #555; border-radius: 3px; padding: 4px; }
-            QTableWidget { background: #2A2A2A; color: #EEE; gridline-color: #444;
-                           border: none; }
-            QHeaderView::section { background: #333; color: #EEE; padding: 4px;
-                                   border: none; border-right: 1px solid #444; }
-            QPushButton { background: #333; color: #EEE; padding: 6px 16px;
-                          border-radius: 4px; }
-            QPushButton:hover { background: #444; }
-        """)
+        self.setMinimumSize(750, 540)
+        self.resize(850, 580)
+        self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 18, 20, 18)
 
-        # Search section
+        # ── Title ──
+        title = QLabel(t("review.title"))
+        title.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {_ACCENT};"
+        )
+        layout.addWidget(title)
+
+        subtitle = QLabel("Search, filter, and batch-edit annotations across all frames")
+        subtitle.setStyleSheet(f"color: {_MUTED}; font-size: 12px;")
+        layout.addWidget(subtitle)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {_BORDER};")
+        layout.addWidget(sep)
+
+        # ── Search section ──
         search_group = QGroupBox(t("review.search"))
         sg_layout = QHBoxLayout(search_group)
+        sg_layout.setSpacing(8)
 
         sg_layout.addWidget(QLabel(t("review.search_by")))
         self._search_type = QComboBox()
@@ -68,14 +117,16 @@ class ReviewPanel(QDialog):
 
         search_btn = QPushButton(t("review.search_btn"))
         search_btn.setStyleSheet(
-            "QPushButton { background: #4A90D9; color: white; font-weight: bold; }"
+            f"QPushButton {{ background: {_ACCENT}; color: {_BG};"
+            f" font-weight: bold; border: none; }}"
+            f"QPushButton:hover {{ background: {_ACCENT_HOVER}; }}"
         )
         search_btn.clicked.connect(self._do_search)
         sg_layout.addWidget(search_btn)
 
         layout.addWidget(search_group)
 
-        # Results table
+        # ── Results table ──
         self._table = QTableWidget()
         self._table.setColumnCount(4)
         self._table.setHorizontalHeaderLabels([
@@ -89,15 +140,18 @@ class ReviewPanel(QDialog):
         self._table.cellDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self._table, stretch=1)
 
-        # Batch edit section
+        # ── Batch edit section ──
         edit_group = QGroupBox(t("review.batch_edit"))
         eg_layout = QHBoxLayout(edit_group)
+        eg_layout.setSpacing(8)
 
         eg_layout.addWidget(QLabel(t("review.change_jersey")))
         self._old_jersey = QSpinBox()
         self._old_jersey.setRange(0, 99)
         eg_layout.addWidget(self._old_jersey)
-        eg_layout.addWidget(QLabel("→"))
+        arrow_lbl = QLabel("\u2192")
+        arrow_lbl.setStyleSheet(f"color: {_ACCENT}; font-size: 16px; font-weight: bold;")
+        eg_layout.addWidget(arrow_lbl)
         self._new_jersey = QSpinBox()
         self._new_jersey.setRange(0, 99)
         eg_layout.addWidget(self._new_jersey)
@@ -109,25 +163,30 @@ class ReviewPanel(QDialog):
 
         apply_btn = QPushButton(t("review.apply_change"))
         apply_btn.setStyleSheet(
-            "QPushButton { background: #D9C84A; color: #1E1E2E; font-weight: bold; }"
+            f"QPushButton {{ background: {_WARNING}; color: {_BG};"
+            f" font-weight: bold; border: none; }}"
+            f"QPushButton:hover {{ background: #E5D45A; }}"
         )
         apply_btn.clicked.connect(self._apply_jersey_change)
         eg_layout.addWidget(apply_btn)
 
         layout.addWidget(edit_group)
 
-        # Bottom buttons
+        # ── Bottom buttons ──
         btn_layout = QHBoxLayout()
 
         player_summary_btn = QPushButton(t("review.player_summary"))
-        player_summary_btn.clicked.connect(self._show_player_summary)
         btn_layout.addWidget(player_summary_btn)
+        player_summary_btn.clicked.connect(self._show_player_summary)
 
         btn_layout.addStretch()
 
         close_btn = QPushButton(t("button.confirm"))
         close_btn.setStyleSheet(
-            "QPushButton { background: #4A90D9; color: white; font-weight: bold; }"
+            f"QPushButton {{ background: {_ACCENT}; color: {_BG};"
+            f" font-weight: bold; padding: 10px 28px; border-radius: 6px;"
+            f" font-size: 13px; border: none; }}"
+            f"QPushButton:hover {{ background: {_ACCENT_HOVER}; }}"
         )
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)

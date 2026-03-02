@@ -17,7 +17,7 @@ class StatsBar(QWidget):
         super().__init__(parent)
         self._stats = stats
         self.setFixedHeight(24)
-        self.setStyleSheet("background: #2A2A2A; border-top: 1px solid #444;")
+        self.setStyleSheet("background: #2A2A3C; border-top: 1px solid #404060;")
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 2, 10, 2)
@@ -32,13 +32,13 @@ class StatsBar(QWidget):
         layout.addWidget(self._eta_label)
 
         self._elapsed_label = QLabel()
-        self._elapsed_label.setStyleSheet("color: #AAA; font-size: 11px;")
+        self._elapsed_label.setStyleSheet("color: #8888A0; font-size: 11px;")
         layout.addWidget(self._elapsed_label)
 
         layout.addStretch()
 
         self._today_label = QLabel()
-        self._today_label.setStyleSheet("color: #AAA; font-size: 11px;")
+        self._today_label.setStyleSheet("color: #8888A0; font-size: 11px;")
         layout.addWidget(self._today_label)
 
         # Auto-refresh every second

@@ -14,6 +14,50 @@ from PyQt6.QtWidgets import (
 from backend.health_analyzer import HealthAnalyzer
 from backend.i18n import t
 
+# ── Design tokens (unified with project palette) ──
+_BG = "#1E1E2E"
+_CARD = "#2A2A3C"
+_ELEVATED = "#33334C"
+_BORDER = "#404060"
+_ACCENT = "#F5A623"
+_ACCENT_HOVER = "#FFB833"
+_TEXT = "#E8E8F0"
+_MUTED = "#8888A0"
+_SUCCESS = "#43A047"
+_ERROR = "#D9534F"
+
+_DIALOG_STYLE = f"""
+    QDialog {{ background: {_BG}; }}
+    QLabel {{ color: {_TEXT}; font-size: 12px; }}
+    QTabWidget::pane {{
+        border: 1px solid {_BORDER}; background: {_CARD};
+        border-radius: 4px;
+    }}
+    QTabBar::tab {{
+        background: {_ELEVATED}; color: {_MUTED};
+        padding: 8px 20px; border-top-left-radius: 4px;
+        border-top-right-radius: 4px; margin-right: 2px;
+        font-size: 12px;
+    }}
+    QTabBar::tab:selected {{
+        background: {_ACCENT}; color: {_BG}; font-weight: bold;
+    }}
+    QTabBar::tab:hover:!selected {{ background: #404060; color: {_TEXT}; }}
+    QTableWidget {{
+        background: {_CARD}; color: {_TEXT};
+        gridline-color: {_BORDER}; border: 1px solid {_BORDER};
+        border-radius: 4px; font-size: 12px;
+    }}
+    QTableWidget::item {{ padding: 6px 8px; }}
+    QTableWidget::item:selected {{ background: #3A3A5C; }}
+    QHeaderView::section {{
+        background: {_ELEVATED}; color: {_MUTED}; padding: 6px 8px;
+        border: none; border-right: 1px solid {_BORDER};
+        font-size: 11px; font-weight: bold;
+    }}
+    QScrollArea {{ border: none; background: transparent; }}
+"""
+
 
 class HealthDashboard(QDialog):
     """Health dashboard showing annotation statistics and issues."""
@@ -21,33 +65,28 @@ class HealthDashboard(QDialog):
     def __init__(self, analyzer: HealthAnalyzer, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("health.title"))
-        self.setMinimumSize(700, 500)
-        self.resize(800, 600)
-        self.setStyleSheet("""
-            QDialog { background: #1E1E1E; }
-            QLabel { color: #EEE; }
-            QTabWidget::pane { border: 1px solid #444; background: #2A2A2A; }
-            QTabBar::tab { background: #333; color: #AAA; padding: 8px 16px; }
-            QTabBar::tab:selected { background: #4A90D9; color: white; }
-            QTableWidget { background: #2A2A2A; color: #EEE; gridline-color: #444;
-                           border: none; }
-            QTableWidget::item { padding: 4px; }
-            QHeaderView::section { background: #333; color: #EEE; padding: 4px;
-                                   border: none; border-right: 1px solid #444; }
-            QScrollArea { border: none; background: #2A2A2A; }
-        """)
+        self.setMinimumSize(750, 540)
+        self.resize(850, 640)
+        self.setStyleSheet(_DIALOG_STYLE)
 
         self._report = analyzer.run_full_analysis()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
 
-        # Title
+        # ── Title ──
         title = QLabel(t("health.title"))
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A90D9;")
+        title.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {_ACCENT};"
+        )
         layout.addWidget(title)
 
-        # Tab widget
+        subtitle = QLabel("Annotation quality overview and detected issues")
+        subtitle.setStyleSheet(f"color: {_MUTED}; font-size: 12px;")
+        layout.addWidget(subtitle)
+
+        # ── Tab widget ──
         tabs = QTabWidget()
         tabs.addTab(self._build_overview_tab(), t("health.tab_overview"))
         tabs.addTab(self._build_distribution_tab(), t("health.tab_distribution"))
@@ -55,19 +94,25 @@ class HealthDashboard(QDialog):
         tabs.addTab(self._build_metadata_tab(), t("health.tab_metadata"))
         layout.addWidget(tabs)
 
-        # Close button
+        # ── Close button ──
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         close_btn = QPushButton(t("button.confirm"))
         close_btn.setStyleSheet(
-            "QPushButton { background: #4A90D9; color: white; padding: 8px 24px;"
-            " border-radius: 4px; font-weight: bold; }"
-            "QPushButton:hover { background: #5AA0E9; }"
+            f"QPushButton {{ background: {_ACCENT}; color: {_BG}; padding: 10px 28px;"
+            f" border-radius: 6px; font-weight: bold; font-size: 13px; border: none; }}"
+            f"QPushButton:hover {{ background: {_ACCENT_HOVER}; }}"
         )
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    # ── Tabs ──────────────────────────────────────────────────────────
 
     def _build_overview_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setSpacing(16)
 
         fs = self._report["frame_stats"]
         bs = self._report["box_stats"]
@@ -101,6 +146,7 @@ class HealthDashboard(QDialog):
     def _build_distribution_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setSpacing(12)
 
         # Category distribution
         layout.addWidget(self._section_label(t("health.category_dist")))
@@ -134,6 +180,7 @@ class HealthDashboard(QDialog):
     def _build_issues_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setSpacing(12)
 
         issues = self._report["issues"]
         layout.addWidget(self._section_label(
@@ -142,7 +189,9 @@ class HealthDashboard(QDialog):
 
         if not issues:
             ok_label = QLabel(t("health.no_issues"))
-            ok_label.setStyleSheet("color: #8AD98A; font-size: 14px; padding: 20px;")
+            ok_label.setStyleSheet(
+                f"color: {_SUCCESS}; font-size: 14px; font-weight: bold; padding: 24px;"
+            )
             ok_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(ok_label)
         else:
@@ -168,6 +217,7 @@ class HealthDashboard(QDialog):
     def _build_metadata_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setSpacing(12)
 
         mc = self._report["metadata_coverage"]
         layout.addWidget(self._section_label(
@@ -202,10 +252,12 @@ class HealthDashboard(QDialog):
         layout.addStretch()
         return widget
 
+    # ── Reusable helpers ──────────────────────────────────────────────
+
     def _section_label(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setStyleSheet(
-            "font-size: 14px; font-weight: bold; color: #CCC;"
+            f"font-size: 13px; font-weight: bold; color: {_MUTED};"
             " padding: 8px 0 4px 0;"
         )
         return label
@@ -214,25 +266,33 @@ class HealthDashboard(QDialog):
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(24)
+        layout.setSpacing(12)
 
         for label_text, value_text in items:
             card = QWidget()
             card.setStyleSheet(
-                "background: #333; border-radius: 6px; padding: 8px;"
+                f"background: {_CARD}; border-radius: 8px;"
+                f" border: 1px solid {_BORDER};"
             )
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 8, 12, 8)
-            card_layout.setSpacing(2)
+            card_layout.setContentsMargins(14, 10, 14, 10)
+            card_layout.setSpacing(4)
 
             value = QLabel(value_text)
-            value.setStyleSheet("color: #4A90D9; font-size: 20px; font-weight: bold;")
+            value.setStyleSheet(
+                f"color: {_ACCENT}; font-size: 22px; font-weight: bold;"
+                " background: transparent; border: none;"
+            )
             value.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card_layout.addWidget(value)
 
             label = QLabel(label_text)
-            label.setStyleSheet("color: #888; font-size: 10px;")
+            label.setStyleSheet(
+                f"color: {_MUTED}; font-size: 11px;"
+                " background: transparent; border: none;"
+            )
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
             card_layout.addWidget(label)
 
             layout.addWidget(card)

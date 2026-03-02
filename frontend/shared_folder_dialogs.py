@@ -57,7 +57,6 @@ DARK_STYLE = f"""
     }}
     QPushButton:hover {{ background: {HOVER_BG}; }}
     QScrollArea {{ border: none; background: transparent; }}
-    QFrame {{ background: transparent; }}
 """
 
 ACCENT_BUTTON_STYLE = f"""
@@ -69,20 +68,16 @@ ACCENT_BUTTON_STYLE = f"""
     QPushButton:disabled {{ background: {BORDER}; color: {MUTED}; }}
 """
 
-CARD_STYLE = f"""
-    QFrame {{
-        background: {CARD_BG}; border: 2px solid {BORDER};
-        border-radius: 8px; padding: 16px;
-    }}
-    QFrame:hover {{ border-color: {ACCENT}; }}
-"""
-
-CARD_STYLE_SELECTED = f"""
-    QFrame {{
-        background: {CARD_BG}; border: 2px solid {ACCENT};
-        border-radius: 8px; padding: 16px;
-    }}
-"""
+# Inline style for card QFrames — NO QFrame selector to avoid cascading to children
+_CARD_INLINE = (
+    f"background: {CARD_BG}; border: 2px solid {BORDER}; border-radius: 8px;"
+)
+_CARD_INLINE_HOVER = (
+    f"background: {CARD_BG}; border: 2px solid {ACCENT}; border-radius: 8px;"
+)
+_CARD_INLINE_SELECTED = (
+    f"background: {CARD_BG}; border: 2px solid {ACCENT}; border-radius: 8px;"
+)
 
 
 def _make_section_label(text: str) -> QLabel:
@@ -174,19 +169,29 @@ class SharedFolderSetupDialog(QDialog):
     def _build_card(self, title: str, subtitle: str) -> QFrame:
         card = QFrame()
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setStyleSheet(CARD_STYLE)
+        card.setStyleSheet(_CARD_INLINE)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setContentsMargins(16, 14, 16, 14)
         card_layout.setSpacing(4)
 
         t_lbl = QLabel(title)
-        t_lbl.setStyleSheet(f"color: {TEXT_COLOR}; font-size: 14px; font-weight: bold;")
+        t_lbl.setStyleSheet(
+            f"color: {TEXT_COLOR}; font-size: 14px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
         card_layout.addWidget(t_lbl)
 
         s_lbl = QLabel(subtitle)
-        s_lbl.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        s_lbl.setStyleSheet(
+            f"color: {MUTED}; font-size: 11px; "
+            "background: transparent; border: none;"
+        )
         s_lbl.setWordWrap(True)
         card_layout.addWidget(s_lbl)
+
+        # Hover effect
+        card.enterEvent = lambda e, c=card: c.setStyleSheet(_CARD_INLINE_HOVER)
+        card.leaveEvent = lambda e, c=card: c.setStyleSheet(_CARD_INLINE)
 
         return card
 
@@ -266,7 +271,7 @@ class SharedFolderConnectDialog(QDialog):
 
         self._checks_frame = QFrame()
         self._checks_frame.setStyleSheet(
-            f"QFrame {{ background: {CARD_BG}; border-radius: 6px; padding: 10px; }}"
+            f"background: {CARD_BG}; border-radius: 6px;"
         )
         checks_layout = QVBoxLayout(self._checks_frame)
         checks_layout.setSpacing(6)
@@ -830,7 +835,7 @@ class TeamPanel(QWidget):
     def _build_member_widget(self, member: dict, is_you: bool) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            f"QFrame {{ background: {CARD_BG}; border-radius: 6px; padding: 6px; }}"
+            f"background: {CARD_BG}; border-radius: 6px;"
         )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(8, 6, 8, 6)

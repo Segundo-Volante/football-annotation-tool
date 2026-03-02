@@ -315,6 +315,8 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self):
         """Build the application menu bar with Project menu."""
         menu_bar = self.menuBar()
+        # Force menu bar inside the window (macOS defaults to native system bar)
+        menu_bar.setNativeMenuBar(False)
         menu_bar.setStyleSheet("""
             QMenuBar {
                 background: #1A1A2A; color: #E8E8F0; font-size: 12px;
@@ -668,7 +670,7 @@ class MainWindow(QMainWindow):
         root = central.layout()
 
         ai_bar = QWidget()
-        ai_bar.setStyleSheet("background: #2A2A2A; border-top: 1px solid #444;")
+        ai_bar.setStyleSheet("background: #2A2A3C; border-top: 1px solid #404060;")
         bar_layout = QHBoxLayout(ai_bar)
         bar_layout.setContentsMargins(8, 4, 8, 4)
         bar_layout.setSpacing(8)
@@ -686,9 +688,9 @@ class MainWindow(QMainWindow):
         self._ai_redetect_btn = QPushButton(t("ai.redetect"))
         self._ai_redetect_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._ai_redetect_btn.setStyleSheet(
-            "QPushButton { background: #3A3A3A; color: #F5A623; padding: 4px 12px;"
-            " border-radius: 3px; font-weight: bold; }"
-            "QPushButton:hover { background: #4A4A4A; }"
+            "QPushButton { background: #404060; color: #F5A623; padding: 4px 12px;"
+            " border-radius: 3px; font-weight: bold; border: none; }"
+            "QPushButton:hover { background: #505070; }"
         )
         self._ai_redetect_btn.clicked.connect(self._re_detect)
         bar_layout.addWidget(self._ai_redetect_btn)
@@ -1514,7 +1516,7 @@ class MainWindow(QMainWindow):
 
         if not is_git_repo:
             from frontend.git_dialogs import GitSetupDialog
-            dialog = GitSetupDialog(str(project_root), self._annotator_name, self)
+            dialog = GitSetupDialog(parent=self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 result = dialog.get_result()
                 if result:
@@ -1622,18 +1624,19 @@ class MainWindow(QMainWindow):
             from frontend.git_dialogs import GitSettingsDialog
             dialog = GitSettingsDialog(
                 project_path=self._folder_path,
-                annotator_name=self._annotator_name,
                 parent=self,
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                result = dialog.get_result()
+                result = dialog.get_settings()
                 if result:
-                    self._annotator_name = result.get("name", self._annotator_name)
+                    name = result.get("name", self._annotator_name)
+                    if name:
+                        self._annotator_name = name
                     if self._git_toolbar:
                         self._git_toolbar.set_annotator(self._annotator_name)
                         self._git_toolbar.refresh_status()
-        except ImportError as e:
-            logger.error("Git settings import error: %s", e)
+        except (ImportError, Exception) as e:
+            logger.error("Git settings error: %s", e)
 
     def _open_project_folder(self):
         """Open the project folder in the system file manager."""

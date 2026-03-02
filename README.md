@@ -31,7 +31,12 @@ A keyboard-driven PyQt6 desktop application for annotating football broadcast fr
 - **COCO JSON export** -- Per-frame annotations, combined dataset, cropped player images, and summary statistics
 - **Dynamic metadata storage** -- Frame metadata stored as JSON blob in SQLite with `in_filename` flag controlling export naming
 - **AI-assisted annotation mode** -- Optional YOLO/RT-DETR object detection auto-detects players and ball; review, correct, and assign identities in seconds
-- **73 passing tests** covering models, database, file manager, exporter, project config, i18n, and AI features
+- **Team collaboration** -- Five workflow options: Solo, Split & Merge, Shared Folder, Git-based, and Custom for multi-person annotation projects
+- **Health Dashboard** -- Real-time annotation quality checks: missing boxes, duplicate frames, jersey conflicts, and category distribution
+- **Review & Batch Edit** -- Search, filter, and bulk-edit annotations across all frames with batch jersey reassignment
+- **Export Preview** -- Choose between COCO JSON and YOLO TXT formats with output structure preview before exporting
+- **YOLO TXT export** -- In addition to COCO JSON, export annotations in YOLO format with `data.yaml` for direct model training
+- **139 passing tests** covering models, database, file manager, exporter, project config, i18n, AI features, and collaboration
 
 ## Quick Start
 
@@ -83,7 +88,7 @@ The wizard creates `config/project.json` with your team configuration and catego
 
 The main workspace shows the current frame with a **filmstrip** on the left for navigation, the **annotation panel** on the right, and the **metadata bar** at the bottom. Click and drag anywhere on the frame to draw a bounding box around a player, referee, or the ball. An amber dashed box appears -- press a number key **1-6** to assign it a category.
 
-![Annotation View](screenshots/annotation_view.png)
+![Annotation View](screenshots/main_annotation_view.png)
 
 Each bounding box is **color-coded by category**: red for home players, blue for opponents, orange for home GK, dark blue for opponent GK, yellow for referees, and green for the ball. For home team players (keys 1 and 3), a popup asks for the jersey number -- the player name auto-fills from the loaded roster CSV. For opponent players (keys 2 and 4), the popup appears only when an opponent roster CSV is available.
 
@@ -189,6 +194,76 @@ python main.py
 - On Apple Silicon Macs running x86 Python (Rosetta 2), model loading may take longer. For best performance, use an ARM-native Python installation.
 - **Nano** models are fastest, **Medium** models are most accurate. Start with Nano for large batches.
 
+### Team Collaboration
+
+The tool supports multi-person annotation projects with five collaboration workflows. Open **Settings > Collaboration** (or `Ctrl+Shift+C`) to configure.
+
+![Collaboration Workflows](screenshots/collaboration_workflow_selection.png)
+
+| Workflow | Description |
+|----------|-------------|
+| **Solo** | Single-person mode. No collaboration setup needed. |
+| **Split & Merge** | Divide frames among team members, annotate independently, then merge results with conflict resolution. |
+| **Shared Folder** | Use a cloud-synced folder (Google Drive, OneDrive, Dropbox) as the shared workspace. |
+| **Git** | Version-controlled collaboration with branching, commits, and push/pull through a built-in Git interface. |
+| **Custom** | Define your own workflow with custom instructions for your team. |
+
+#### Split & Merge
+
+Divide frames across annotators by count or percentage. Each person works on their assigned range, then merge all annotations back together.
+
+![Split Frames](screenshots/split_merge_divide_frames.png)
+
+When merging, the tool detects conflicts (frames annotated by multiple people) and lets you choose how to resolve them -- keep first, keep latest, or keep the one with more boxes.
+
+![Merge Annotations](screenshots/split_merge_annotations.png)
+
+#### Shared Folder
+
+Connect a cloud-synced folder as your shared workspace. The setup guide walks through configuration for Google Drive, OneDrive, or Dropbox.
+
+![Shared Folder Setup](screenshots/shared_folder_setup.png)
+
+![Shared Folder Guide](screenshots/shared_folder_guide.png)
+
+#### Git Collaboration
+
+Set up your identity, then clone a remote repository or connect an existing local repo. The built-in Git interface handles commits, pushes, and pulls.
+
+![Git Setup](screenshots/git_collaboration_setup.png)
+
+![Clone Repository](screenshots/git_clone_repo.png)
+
+![Connect Repository](screenshots/git_connect_repo.png)
+
+### Tools
+
+Access built-in tools from the **Tools** menu (or their keyboard shortcuts) to monitor annotation quality, review your work, and export datasets.
+
+![Tools Menu](screenshots/tools_menu.png)
+
+#### Health Dashboard (`Ctrl+H`)
+
+Real-time annotation quality analysis. The Overview tab shows frame and bounding box statistics. The Issues tab flags problems like missing boxes, duplicate frames, and jersey conflicts. The Distribution tab shows category and jersey number breakdowns.
+
+![Health Dashboard -- Overview](screenshots/health_dashboard_overview.png)
+
+![Health Dashboard -- Issues](screenshots/health_dashboard_issues.png)
+
+![Health Dashboard -- Distribution](screenshots/health_dashboard_distribution.png)
+
+#### Review & Batch Edit (`Ctrl+R`)
+
+Search and filter annotations across all frames. Jump to any frame directly from the results. Use batch edit to reassign jersey numbers across multiple frames at once.
+
+![Review Panel](screenshots/review_panel.png)
+
+#### Export Preview (`Ctrl+E`)
+
+Preview what will be exported before running the export. Choose between **COCO JSON** and **YOLO TXT** formats, set the output folder, and see the exact file structure that will be generated.
+
+![Export Preview](screenshots/export_preview.png)
+
 ---
 
 ## Keyboard Shortcuts
@@ -209,6 +284,10 @@ python main.py
 | `Ctrl+S` | Force save |
 | `Ctrl+1-6` | Bulk assign all pending as category (AI mode) |
 | `Ctrl+A` | Accept all pending as Opponent (AI mode) |
+| `Ctrl+H` | Open Health Dashboard |
+| `Ctrl+R` | Open Review & Batch Edit |
+| `Ctrl+E` | Open Export Preview |
+| `Ctrl+Shift+C` | Open Collaboration Settings |
 
 ## Categories
 
@@ -309,10 +388,14 @@ football-annotation-tool/
 │   ├── models.py           # Data models (Category, BoundingBox, FrameAnnotation)
 │   ├── database.py         # SQLite manager with WAL mode + JSON metadata
 │   ├── exporter.py         # COCO JSON + crop export with dynamic naming
+│   ├── yolo_exporter.py    # YOLO TXT format export with data.yaml
+│   ├── annotation_store.py # Annotation store for health/review tools
 │   ├── file_manager.py     # Image I/O and folder scanning
 │   ├── model_manager.py    # AI model manager (YOLO/RT-DETR, optional)
 │   ├── roster_manager.py   # CSV roster loader + player lookup
 │   ├── project_config.py   # Project configuration loader (project.json)
+│   ├── session_stats.py    # Real-time session speed/ETA tracking
+│   ├── collaboration.py    # Collaboration workflow manager
 │   └── i18n.py             # JSON-based internationalization
 ├── frontend/
 │   ├── main_window.py      # Main application window
@@ -325,6 +408,13 @@ football-annotation-tool/
 │   ├── player_popup.py     # Jersey number input popup
 │   ├── shortcuts.py        # Keyboard shortcut handler
 │   ├── progress_bar.py     # Session progress display
+│   ├── stats_bar.py        # Real-time speed/ETA stats bar
+│   ├── health_dashboard.py # Annotation health dashboard
+│   ├── review_panel.py     # Review & batch edit panel
+│   ├── export_preview_dialog.py # Export format preview dialog
+│   ├── git_dialogs.py      # Git collaboration dialogs
+│   ├── split_merge_dialogs.py   # Split & merge workflow dialogs
+│   ├── shared_folder_dialogs.py # Shared folder workflow dialogs
 │   └── toast.py            # Non-blocking overlay notifications
 ├── rosters/
 │   └── atletico_madrid_2024-25.csv  # Example roster (CSV)
@@ -344,7 +434,7 @@ football-annotation-tool/
 │       ├── fr.json             # French
 │       └── es.json             # Spanish
 ├── screenshots/            # App screenshots for documentation
-├── tests/                  # 73 tests (pytest)
+├── tests/                  # 139 tests (pytest)
 ├── TUTORIAL.md             # Full usage guide
 ├── TUTORIAL.pdf            # PDF version of the tutorial
 ├── requirements.txt        # Base dependencies (PyQt6, OpenCV)
