@@ -8,15 +8,15 @@ A keyboard-driven PyQt6 desktop application for annotating soccer broadcast fram
 
 ## Features
 
-- **Session dialog** — Configure folder, competition, round, opponent, weather, and lighting per session
-- **Tab + Number metadata system** — 6 frame-level dimensions (shot type, camera motion, ball status, game situation, pitch zone, frame quality) set via Tab cycling and number key selection
-- **Bounding box annotation** — Draw, move, resize boxes with category-colored outlines and pending box prompts
-- **CSV roster system** — Load any team's roster from a simple CSV file; Atletico de Madrid 2024-25 included by default
-- **Player roster auto-fill** — Type a jersey number and the player name fills automatically from the loaded roster
-- **Auto-skip** — Frames tagged as replay, broadcast, crowd, overlay_heavy, or transition are skipped instantly
-- **Metadata inheritance** — Consecutive frames inherit the previous frame's metadata automatically
-- **Real-time persistence** — SQLite database with WAL mode saves every action; resume any session by reopening its folder
-- **COCO JSON export** — Per-frame annotations, combined dataset, cropped player images, and summary statistics
+- **Session dialog** -- Configure folder, roster CSV, competition, round, opponent, weather, and lighting per session
+- **Tab + Number metadata system** -- 6 frame-level dimensions set via Tab cycling and number key selection
+- **Bounding box annotation** -- Draw, move, resize boxes with category-colored outlines and pending box prompts
+- **CSV roster system** -- Load any team's roster from a simple CSV file; Atletico de Madrid 2024-25 included as an example
+- **Player roster auto-fill** -- Type a jersey number and the player name fills automatically from the loaded roster
+- **Auto-skip** -- Frames tagged as replay, broadcast, crowd, overlay_heavy, or transition are skipped instantly
+- **Metadata inheritance** -- Consecutive frames inherit the previous frame's metadata automatically
+- **Real-time persistence** -- SQLite database with WAL mode saves every action; resume any session by reopening its folder
+- **COCO JSON export** -- Per-frame annotations, combined dataset, cropped player images, and summary statistics
 - **34 passing tests** covering models, database, file manager, and exporter
 
 ## Quick Start
@@ -46,13 +46,57 @@ python main.py
 python -m pytest tests/ -v
 ```
 
-## Workflow
+---
 
-1. **Launch** — A session dialog asks for the screenshot folder, roster CSV, competition, round, opponent, weather, and lighting
-2. **Set metadata** — Use `Tab` to cycle dimensions, `1-9` to select options
-3. **Draw boxes** — Click and drag on players/ball/referees, then press `1-6` to assign a category
-4. **Set occlusion** — `F` visible, `G` partial, `H` heavy, `T` truncated
-5. **Export** — Press `Enter` to export the frame, `Esc` to skip
+## How It Works
+
+### Step 1 -- Annotate Frames
+
+The main workspace shows the current frame with a **filmstrip** on the left for navigation, the **annotation panel** on the right, and the **metadata bar** at the bottom. Click and drag anywhere on the frame to draw a bounding box around a player, referee, or the ball. An amber dashed box appears -- press a number key **1-6** to assign it a category.
+
+![Annotation View](screenshots/annotation_view.png)
+
+Each bounding box is **color-coded by category**: red for home players, blue for opponents, orange for home GK, dark blue for opponent GK, yellow for referees, and green for the ball. For home team players (keys 1 and 3), a popup asks for the jersey number -- the player name auto-fills from the loaded roster CSV.
+
+The **right panel** lists every box on the current frame with the player's jersey number, name, and occlusion status. Click any entry to select it on the canvas. Double-click to edit player info. Use `Delete` to remove a box or `Ctrl+Z` to undo.
+
+![Annotation Panel](screenshots/annotation_panel.png)
+
+### Step 2 -- Set Frame Metadata (Tab + Number System)
+
+Each frame has **6 metadata dimensions**. Press **Tab** to cycle to the next dimension (or **Shift+Tab** to go back). The active dimension is highlighted with an **amber border**. Then press a **number key (1-9)** to pick an option -- the selected value turns **bold amber**.
+
+**SHOT** -- Describes the camera framing. Options in red (replay, broadcast, crowd) trigger auto-skip.
+
+![Metadata - Shot Type](screenshots/metadata_shot.png)
+
+**CAMERA** -- Describes camera movement. Transition triggers auto-skip.
+
+![Metadata - Camera Motion](screenshots/metadata_camera.png)
+
+**BALL** -- Ball visibility in the frame.
+
+![Metadata - Ball Status](screenshots/metadata_ball.png)
+
+**SITUATION** -- Current game state (open play, set piece, celebration, etc.).
+
+![Metadata - Game Situation](screenshots/metadata_situation.png)
+
+**ZONE** -- Which third of the pitch is shown.
+
+![Metadata - Pitch Zone](screenshots/metadata_zone.png)
+
+**QUALITY** -- Frame quality. Overlay_heavy and transition trigger auto-skip.
+
+![Metadata - Frame Quality](screenshots/metadata_quality.png)
+
+Metadata **carries over** automatically between consecutive frames -- only change what's different. Values shown in **red** trigger **auto-skip**, which instantly skips the frame and advances to the next one.
+
+### Step 3 -- Export or Skip
+
+Once all boxes are drawn and metadata is set, press **Enter** to export the frame (saves the renamed image, COCO JSON annotation, and cropped player images) or **Esc** to skip it. The tool then advances to the next unviewed frame.
+
+---
 
 ## Keyboard Shortcuts
 
@@ -130,11 +174,12 @@ soccer-annotation-tool/
 │   ├── progress_bar.py     # Session progress display
 │   └── toast.py            # Non-blocking overlay notifications
 ├── rosters/
-│   └── atletico_madrid_2024-25.csv  # Default roster (CSV)
+│   └── atletico_madrid_2024-25.csv  # Example roster (CSV)
 ├── config/
 │   ├── metadata_options.json  # 6 metadata dimensions + options
 │   ├── categories.json        # Category definitions + colors
 │   └── settings.json          # App settings
+├── screenshots/            # App screenshots for documentation
 ├── tests/                  # 34 tests (pytest)
 ├── TUTORIAL.md             # Full usage guide
 ├── TUTORIAL.pdf            # PDF version of the tutorial
@@ -145,7 +190,7 @@ soccer-annotation-tool/
 
 ### Roster (CSV)
 
-The included `rosters/atletico_madrid_2024-25.csv` is just an example. You can create a CSV for **any team and any season** -- simply make a new file in the `rosters/` folder with 4 columns:
+The included `rosters/atletico_madrid_2024-25.csv` is just an **example**. You can create a CSV for **any team and any season** -- simply make a new file in the `rosters/` folder with 4 columns:
 
 ```csv
 team,season,number,name
@@ -171,7 +216,7 @@ The source dropdown includes leagues and cups from 7 countries plus continental 
 | Netherlands | Eredivisie, Eerste Divisie | KNVB Beker, Johan Cruyff Schaal |
 | Continental | UCL, UEL, UECL | |
 
-The source field is also editable -- you can type any competition name directly if it's not in the list.
+The source field is also **editable** -- you can type any competition name directly if it's not in the list.
 
 To permanently add more leagues or cups, edit `frontend/session_dialog.py` and add entries to the `self._source_combo.addItems([...])` list.
 
