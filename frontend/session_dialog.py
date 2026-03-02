@@ -8,11 +8,21 @@ from PyQt6.QtWidgets import (
     QFrame,
 )
 
-from backend.i18n import t
+from backend.i18n import I18n, t
+
+# Language options with country flag emoji and native "Language" label
+LANGUAGE_OPTIONS = [
+    ("en", "\U0001F1EC\U0001F1E7  Language", "English"),
+    ("es", "\U0001F1EA\U0001F1F8  Idioma", "Espa\u00f1ol"),
+    ("it", "\U0001F1EE\U0001F1F9  Lingua", "Italiano"),
+    ("de", "\U0001F1E9\U0001F1EA  Sprache", "Deutsch"),
+    ("pt", "\U0001F1F5\U0001F1F9  Idioma", "Portugu\u00eas"),
+    ("fr", "\U0001F1EB\U0001F1F7  Langue", "Fran\u00e7ais"),
+]
 
 
 class SessionDialog(QDialog):
-    """Startup dialog: folder, roster CSV, session defaults (weather, lighting)."""
+    """Startup dialog: language selector, folder, roster CSV, session defaults."""
 
     def __init__(self, parent=None, project_config=None):
         super().__init__(parent)
@@ -48,43 +58,85 @@ class SessionDialog(QDialog):
         self._folder_path = ""
         self._roster_path = ""
         self._result = {}
+        self._selected_lang = I18n.lang()
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(24, 20, 24, 20)
 
         # Title
-        title = QLabel(t("main.window_title"))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #F5A623;")
-        layout.addWidget(title)
+        self._title_label = QLabel(t("main.window_title"))
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #F5A623;")
+        layout.addWidget(self._title_label)
+
+        # ── Language selector row ──
+        lang_row = QHBoxLayout()
+        lang_row.setSpacing(6)
+
+        # Build the label from all languages' word for "Language"
+        lang_header_parts = []
+        for code, native_word, _name in LANGUAGE_OPTIONS:
+            # Extract just the flag + word (e.g. "🇬🇧 Language")
+            lang_header_parts.append(native_word)
+        lang_header = QLabel("  /  ".join(lang_header_parts))
+        lang_header.setStyleSheet(
+            "color: #8888A0; font-size: 10px; font-weight: bold;"
+        )
+        lang_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lang_header)
+
+        # Language buttons row
+        lang_btn_row = QHBoxLayout()
+        lang_btn_row.setSpacing(4)
+        lang_btn_row.addStretch()
+        self._lang_buttons: list[QPushButton] = []
+        for code, native_word, display_name in LANGUAGE_OPTIONS:
+            # Extract just the flag emoji (first 4 chars)
+            flag = native_word.split("  ")[0]
+            btn = QPushButton(f"{flag} {display_name}")
+            btn.setProperty("lang_code", code)
+            btn.setFixedHeight(30)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.clicked.connect(lambda _checked, c=code: self._on_language_changed(c))
+            self._lang_buttons.append(btn)
+            lang_btn_row.addWidget(btn)
+        lang_btn_row.addStretch()
+        layout.addLayout(lang_btn_row)
+        self._update_lang_buttons()
+
+        # Separator after language
+        lang_sep = QFrame()
+        lang_sep.setFrameShape(QFrame.Shape.HLine)
+        lang_sep.setStyleSheet("color: #404060;")
+        layout.addWidget(lang_sep)
 
         # Folder row
-        folder_label = QLabel(t("session.folder_label"))
-        folder_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(folder_label)
+        self._folder_label = QLabel(t("session.folder_label"))
+        self._folder_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self._folder_label)
         folder_row = QHBoxLayout()
         self._folder_input = QLineEdit()
         self._folder_input.setPlaceholderText(t("session.folder_placeholder"))
         self._folder_input.setReadOnly(True)
         folder_row.addWidget(self._folder_input, stretch=1)
-        browse_btn = QPushButton(t("button.browse"))
-        browse_btn.clicked.connect(self._browse_folder)
-        folder_row.addWidget(browse_btn)
+        self._browse_folder_btn = QPushButton(t("button.browse"))
+        self._browse_folder_btn.clicked.connect(self._browse_folder)
+        folder_row.addWidget(self._browse_folder_btn)
         layout.addLayout(folder_row)
 
         # Roster CSV row
-        roster_label = QLabel(t("session.roster_label"))
-        roster_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(roster_label)
+        self._roster_label = QLabel(t("session.roster_label"))
+        self._roster_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self._roster_label)
         roster_row = QHBoxLayout()
         self._roster_input = QLineEdit()
         self._roster_input.setPlaceholderText(t("session.roster_placeholder"))
         self._roster_input.setReadOnly(True)
         roster_row.addWidget(self._roster_input, stretch=1)
-        roster_btn = QPushButton(t("button.browse"))
-        roster_btn.clicked.connect(self._browse_roster)
-        roster_row.addWidget(roster_btn)
+        self._browse_roster_btn = QPushButton(t("button.browse"))
+        self._browse_roster_btn.clicked.connect(self._browse_roster)
+        roster_row.addWidget(self._browse_roster_btn)
         layout.addLayout(roster_row)
 
         # Roster info label (shows team + season after selecting CSV)
@@ -101,7 +153,8 @@ class SessionDialog(QDialog):
         # Source / Round / Opponent row
         grid = QGridLayout()
         grid.setSpacing(8)
-        grid.addWidget(QLabel(t("session.source_label")), 0, 0)
+        self._source_label = QLabel(t("session.source_label"))
+        grid.addWidget(self._source_label, 0, 0)
         self._source_combo = QComboBox()
         self._source_combo.setEditable(True)
         self._source_combo.lineEdit().setPlaceholderText(t("session.source_placeholder"))
@@ -122,12 +175,14 @@ class SessionDialog(QDialog):
         self._source_combo.addItems(competitions)
         grid.addWidget(self._source_combo, 0, 1)
 
-        grid.addWidget(QLabel(t("session.round_label")), 0, 2)
+        self._round_label = QLabel(t("session.round_label"))
+        grid.addWidget(self._round_label, 0, 2)
         self._round_input = QLineEdit()
         self._round_input.setPlaceholderText(t("session.round_placeholder"))
         grid.addWidget(self._round_input, 0, 3)
 
-        grid.addWidget(QLabel(t("session.opponent_label")), 1, 0)
+        self._opponent_label = QLabel(t("session.opponent_label"))
+        grid.addWidget(self._opponent_label, 1, 0)
         self._opponent_combo = QComboBox()
         self._opponent_combo.setEditable(True)
         self._opponent_combo.lineEdit().setPlaceholderText(t("session.opponent_placeholder"))
@@ -145,9 +200,9 @@ class SessionDialog(QDialog):
         sep2.setStyleSheet("color: #404060;")
         layout.addWidget(sep2)
 
-        session_label = QLabel(t("session.defaults_label"))
-        session_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(session_label)
+        self._defaults_label = QLabel(t("session.defaults_label"))
+        self._defaults_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self._defaults_label)
 
         # Build session-level radio groups dynamically from config array
         self._session_groups: dict[str, QButtonGroup] = {}
@@ -202,6 +257,60 @@ class SessionDialog(QDialog):
             self._roster_input.setText(str(default_roster))
             self._preview_roster(default_roster)
 
+    # ── Language switching ──
+
+    def _update_lang_buttons(self):
+        """Highlight the active language button."""
+        for btn in self._lang_buttons:
+            code = btn.property("lang_code")
+            if code == self._selected_lang:
+                btn.setStyleSheet(
+                    "QPushButton { background: #F5A623; color: #1E1E2E; "
+                    "font-weight: bold; font-size: 11px; border-radius: 4px; "
+                    "padding: 4px 10px; border: none; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { background: #333348; color: #AAAACC; "
+                    "font-size: 11px; border-radius: 4px; "
+                    "padding: 4px 10px; border: 1px solid #555570; }"
+                    "QPushButton:hover { background: #3A3A50; }"
+                )
+
+    def _on_language_changed(self, lang_code: str):
+        """Reload i18n and update all translatable labels."""
+        if lang_code == self._selected_lang:
+            return
+        self._selected_lang = lang_code
+        config_dir = Path(__file__).parent.parent / "config"
+        I18n.load(lang_code, config_dir)
+
+        # Update all translatable text in the dialog
+        self.setWindowTitle(t("session.window_title"))
+        self._title_label.setText(t("main.window_title"))
+        self._folder_label.setText(t("session.folder_label"))
+        self._folder_input.setPlaceholderText(t("session.folder_placeholder"))
+        self._browse_folder_btn.setText(t("button.browse"))
+        self._roster_label.setText(t("session.roster_label"))
+        self._roster_input.setPlaceholderText(t("session.roster_placeholder"))
+        self._browse_roster_btn.setText(t("button.browse"))
+        self._source_label.setText(t("session.source_label"))
+        self._source_combo.lineEdit().setPlaceholderText(t("session.source_placeholder"))
+        self._round_label.setText(t("session.round_label"))
+        self._round_input.setPlaceholderText(t("session.round_placeholder"))
+        self._opponent_label.setText(t("session.opponent_label"))
+        self._opponent_combo.lineEdit().setPlaceholderText(t("session.opponent_placeholder"))
+        self._defaults_label.setText(t("session.defaults_label"))
+        self._start_btn.setText(t("button.start_annotating"))
+
+        self._update_lang_buttons()
+
+        # Save language preference to project config
+        if self._project_config and self._project_config.exists:
+            self._project_config.set_language(lang_code)
+
+    # ── File browsing ──
+
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, t("dialog.select_folder"))
         if folder:
@@ -249,6 +358,7 @@ class SessionDialog(QDialog):
             "source": self._source_combo.currentText(),
             "round": self._round_input.text().strip(),
             "opponent": self._opponent_combo.currentText().strip(),
+            "language": self._selected_lang,
         }
         # Collect session-level values from dynamic radio groups
         defaults = {"weather": "clear", "lighting": "floodlight"}

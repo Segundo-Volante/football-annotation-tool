@@ -51,6 +51,13 @@ def test_load_french():
     assert "Football" in t("main.window_title")
 
 
+def test_load_spanish():
+    config_dir = Path(__file__).parent.parent / "config"
+    I18n.load("es", config_dir)
+    assert I18n.lang() == "es"
+    assert "F\u00fatbol" in t("main.window_title")
+
+
 def test_fallback_to_key():
     """Unknown keys return the key itself."""
     config_dir = Path(__file__).parent.parent / "config"
@@ -77,7 +84,7 @@ def test_all_languages_have_same_keys():
     """All language files must have the same set of keys."""
     i18n_dir = Path(__file__).parent.parent / "config" / "i18n"
     lang_files = sorted(i18n_dir.glob("*.json"))
-    assert len(lang_files) >= 5, f"Expected at least 5 language files, got {len(lang_files)}"
+    assert len(lang_files) >= 6, f"Expected at least 6 language files, got {len(lang_files)}"
 
     all_keys = {}
     for lang_file in lang_files:

@@ -102,6 +102,12 @@ class ProjectConfig:
                 return csv_path
         return None
 
+    def set_language(self, lang: str):
+        """Update language in project.json."""
+        if self._data:
+            self._data["language"] = lang
+            self.save(self._data)
+
     def save(self, data: dict):
         """Write project.json."""
         self._project_path.parent.mkdir(parents=True, exist_ok=True)

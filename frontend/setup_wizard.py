@@ -26,6 +26,7 @@ COMPETITION_GROUPS = {
 
 LANGUAGES = [
     ("en", "English"),
+    ("es", "Español"),
     ("it", "Italiano"),
     ("de", "Deutsch"),
     ("pt", "Português"),
