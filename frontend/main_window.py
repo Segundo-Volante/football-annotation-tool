@@ -12,25 +12,34 @@ from PyQt6.QtWidgets import (
 
 from pathlib import Path
 
-from backend.database import DatabaseManager
+from backend.annotation_store import AnnotationStore
+from backend.backup_manager import BackupManager
+from backend.batch_operations import BatchOperations
+from backend.health_analyzer import HealthAnalyzer
+from backend.session_stats import SessionStats
+from backend.state_db import StateDB
 from backend.exporter import Exporter
 from backend.file_manager import FileManager
 from backend.i18n import I18n, t
 from backend.models import (
-    BoundingBox, BoxStatus, Category, FrameAnnotation, FrameStatus,
-    Occlusion, METADATA_KEYS,
+    BoundingBox, BoxStatus, Category, CATEGORY_NAMES, FrameAnnotation,
+    FrameStatus, Occlusion, METADATA_KEYS,
 )
 from backend.project_config import ProjectConfig
 from backend.roster_manager import RosterManager
 from frontend.annotation_panel import AnnotationPanel
 from frontend.canvas import AnnotationCanvas
 from frontend.filmstrip import Filmstrip
+from frontend.health_dashboard import HealthDashboard
 from frontend.metadata_bar import MetadataBar
 from frontend.player_popup import PlayerPopup
 from frontend.progress_bar import ProgressBarWidget
+from frontend.review_panel import ReviewPanel
 from frontend.session_dialog import SessionDialog
+from frontend.session_summary_dialog import SessionSummaryDialog
 from frontend.setup_wizard import SetupWizard
 from frontend.shortcuts import ShortcutHandler
+from frontend.stats_bar import StatsBar
 from frontend.toast import Toast
 
 logger = logging.getLogger(__name__)
@@ -167,8 +176,9 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900)
         self.setStyleSheet("background: #1E1E1E;")
 
-        # Backend
-        self._db: Optional[DatabaseManager] = None
+        # Backend — per-frame JSON store + local state DB
+        self._store: Optional[AnnotationStore] = None
+        self._state_db: Optional[StateDB] = None
         self._roster: Optional[RosterManager] = None
         self._opponent_roster: Optional[RosterManager] = None
         self._exporter: Optional[Exporter] = None
@@ -176,11 +186,12 @@ class MainWindow(QMainWindow):
         # Session state
         self._session_id: Optional[int] = None
         self._folder_path: Optional[str] = None
-        self._frames: list[dict] = []
+        self._frames: list[dict] = []           # [{filename, status, sort_order}, ...]
         self._current_row: int = -1
         self._current_frame: Optional[FrameAnnotation] = None
+        self._current_filename: Optional[str] = None
         self._pending_box: Optional[tuple] = None  # (x, y, w, h) waiting for category
-        self._undo_stack: list[int] = []  # box IDs for undo
+        self._undo_stack: list[tuple] = []  # (filename, box_id) pairs for undo
 
         # AI-Assisted mode state
         self._annotation_mode: str = "manual"
@@ -190,7 +201,16 @@ class MainWindow(QMainWindow):
         self._detection_thread: Optional[QThread] = None
         self._detection_worker: Optional[_DetectionWorker] = None
         self._detecting: bool = False  # True while detection is running
-        self._detecting_frame_id: Optional[int] = None
+        self._detecting_filename: Optional[str] = None
+
+        # Phase 2-7: New subsystem instances
+        self._backup_manager: Optional[BackupManager] = None
+        self._session_stats: Optional[SessionStats] = None
+        self._stats_bar: Optional[StatsBar] = None
+        self._backup_timer: Optional[QTimer] = None
+
+        # Session metadata (carried from SessionDialog)
+        self._session_meta: dict = {}
 
         # Build UI
         self._build_ui()
@@ -312,6 +332,11 @@ class MainWindow(QMainWindow):
         self._shortcuts.bulk_assign.connect(self._on_bulk_assign)
         self._shortcuts.accept_all.connect(self._on_accept_all)
 
+        # Dashboard / Review / Export Preview
+        self._shortcuts.open_health.connect(self._open_health_dashboard)
+        self._shortcuts.open_review.connect(self._open_review_panel)
+        self._shortcuts.open_export_preview.connect(self._open_export_preview)
+
     def keyPressEvent(self, event):
         if not self._shortcuts.handle_key(event):
             super().keyPressEvent(event)
@@ -385,28 +410,63 @@ class MainWindow(QMainWindow):
                        custom_model_path: str = ""):
         self._folder_path = folder
         self._annotation_mode = annotation_mode
-        db_path = os.path.join(folder, "annotations.db")
-        self._db = DatabaseManager(db_path)
 
-        existing = self._db.find_session_by_folder(folder)
+        # Session-level metadata to embed in every frame JSON
+        self._session_meta = {
+            "source": source,
+            "match_round": match_round,
+            "opponent": opponent,
+            "weather": weather,
+            "lighting": lighting,
+        }
+
+        # ── Check for migration from old SQLite format ──
+        old_db_path = Path(folder) / "annotations.db"
+        annotations_dir = Path(folder) / "annotations"
+        if old_db_path.exists() and not (annotations_dir.exists() and any(annotations_dir.glob("*.json"))):
+            self._offer_migration(old_db_path, folder)
+
+        # ── Per-frame JSON store (new source of truth) ──
+        self._store = AnnotationStore(folder)
+
+        # ── Local state DB (session info, UI state) ──
+        state_db_path = Path(folder) / "local_state.db"
+        self._state_db = StateDB(state_db_path)
+
+        existing = self._state_db.find_session_by_folder(folder)
         if existing:
             self._session_id = existing
-            session_data = self._db.get_session(existing)  # update last_opened
-            # Always use the mode the user selected in the dialog (not stored mode)
+            self._state_db.get_session(existing)  # updates last_opened
         else:
-            self._session_id = self._db.create_session(
+            self._session_id = self._state_db.create_session(
                 folder, source, match_round, opponent, weather, lighting,
                 annotation_mode=annotation_mode,
                 model_name=model_name,
                 model_confidence=model_confidence,
             )
-            # Scan and add frames
-            filenames = FileManager.scan_folder(folder)
-            if not filenames:
-                QMessageBox.warning(self, t("error.title"), t("error.no_images_found"))
-                return
-            for i, fname in enumerate(filenames):
-                self._db.add_frame(self._session_id, fname, i)
+
+        # ── Scan frames and ensure JSON files exist ──
+        filenames = FileManager.scan_folder(folder)
+        if not filenames:
+            QMessageBox.warning(self, t("error.title"), t("error.no_images_found"))
+            return
+
+        # Build the frames list from scanned files + annotation status
+        annotation_status = {}
+        for summary in self._store.get_all_frame_summaries():
+            annotation_status[summary["filename"]] = summary["status"]
+
+        self._frames = []
+        for i, fname in enumerate(filenames):
+            status = annotation_status.get(fname, "unviewed")
+            self._frames.append({
+                "filename": fname,
+                "original_filename": fname,  # compat key for filmstrip
+                "status": status,
+                "sort_order": i,
+            })
+            # Ensure each frame has a JSON annotation file
+            self._store.ensure_frame(fname, session_meta=self._session_meta)
 
         # Initialize AI model if in AI-assisted mode
         self._model_manager = None
@@ -417,12 +477,11 @@ class MainWindow(QMainWindow):
         output_path = os.path.join(folder, "output")
         team_name = self._project_config.team_name if self._project_config.exists else "Home Team"
         self._exporter = Exporter(
-            self._db, folder, output_path, team_name=team_name,
+            self._store, folder, output_path, team_name=team_name,
             has_opponent_roster=self._opponent_roster is not None,
         )
 
-        # Load frames
-        self._frames = self._db.get_session_frames(self._session_id)
+        # Load filmstrip
         self._filmstrip.load_frames(self._frames, folder)
 
         self.setWindowTitle(t("main.window_title_with_team",
@@ -432,6 +491,25 @@ class MainWindow(QMainWindow):
         if self._annotation_mode == "ai_assisted":
             self._setup_ai_status_bar()
 
+        # ── Phase 2: Auto Backup ──
+        self._backup_manager = BackupManager(folder)
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self._check_backup)
+        self._backup_timer.start(60_000)  # check every 60s
+
+        # ── Phase 3: Session Statistics ──
+        self._session_stats = SessionStats(total_frames=len(self._frames))
+        stats = self._store.get_session_stats()
+        self._session_stats.update_counts(
+            stats["annotated"], stats["skipped"], len(self._frames),
+        )
+        self._session_stats.start_session()
+        self._setup_stats_bar()
+
+        # Mark clean exit as False (will set True on close)
+        if self._state_db:
+            self._state_db.save_clean_exit(False)
+
         # Jump to first unviewed frame
         first_unviewed = 0
         for i, f in enumerate(self._frames):
@@ -439,6 +517,36 @@ class MainWindow(QMainWindow):
                 first_unviewed = i
                 break
         self._load_frame_at_row(first_unviewed)
+
+    def _offer_migration(self, old_db_path: Path, folder: str):
+        """Offer to migrate from old SQLite format to per-frame JSON."""
+        reply = QMessageBox.question(
+            self,
+            "Migrate Project",
+            "This project uses the old annotation format (SQLite).\n\n"
+            "Migrate to the new per-frame JSON format?\n"
+            "(Required for team collaboration features)\n\n"
+            "Your old database will be backed up as annotations.db.backup.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                from backend.migration import MigrationTool
+                migrator = MigrationTool(old_db_path, folder)
+                result = migrator.migrate()
+                QMessageBox.information(
+                    self,
+                    "Migration Complete",
+                    f"Migrated {result['frames_migrated']} frames "
+                    f"and {result['boxes_migrated']} boxes.\n\n"
+                    f"Old database backed up as annotations.db.backup.",
+                )
+            except Exception as e:
+                logger.error("Migration failed: %s", e, exc_info=True)
+                QMessageBox.critical(
+                    self, "Migration Failed",
+                    f"Migration failed: {e}\n\nYou can try again later.",
+                )
 
     def _init_model_manager(self, model_name: str, confidence: float,
                             custom_model_path: str = ""):
@@ -499,30 +607,143 @@ class MainWindow(QMainWindow):
         # Insert after progress bar (index 1)
         root.insertWidget(1, ai_bar)
 
+    def _setup_stats_bar(self):
+        """Add the real-time statistics bar below the progress bar."""
+        if not self._session_stats:
+            return
+        central = self.centralWidget()
+        root = central.layout()
+        self._stats_bar = StatsBar(self._session_stats)
+        # Insert after progress bar (and AI bar if present)
+        insert_idx = 1
+        if self._annotation_mode == "ai_assisted":
+            insert_idx = 2
+        root.insertWidget(insert_idx, self._stats_bar)
+
+    def _check_backup(self):
+        """Called by timer — triggers auto-backup if time interval reached."""
+        if self._backup_manager:
+            result = self._backup_manager.check_time_trigger()
+            if result:
+                self._toast.show_message(t("backup.auto"), "info", 2000)
+                if self._state_db:
+                    count = len(list(
+                        (Path(self._folder_path) / "annotations").glob("*.json")
+                    )) if self._folder_path else 0
+                    self._state_db.record_backup(result, count)
+
+    def _notify_backup_on_save(self):
+        """Called after exporting a frame — may trigger backup by frame count."""
+        if self._backup_manager:
+            result = self._backup_manager.notify_frame_saved()
+            if result:
+                self._toast.show_message(t("backup.auto"), "info", 2000)
+
+    # ── Menu Actions (Health, Review, Export Preview) ──
+
+    def _open_health_dashboard(self):
+        """Open the Dataset Health Dashboard."""
+        if not self._store:
+            return
+        analyzer = HealthAnalyzer(self._store)
+        dialog = HealthDashboard(analyzer, self)
+        dialog.exec()
+
+    def _open_review_panel(self):
+        """Open the Quick Review & Batch Edit panel."""
+        if not self._store:
+            return
+        batch_ops = BatchOperations(self._store)
+        dialog = ReviewPanel(batch_ops, self)
+        dialog.navigate_to_frame.connect(self._navigate_to_filename)
+        dialog.exec()
+
+    def _navigate_to_filename(self, filename: str):
+        """Navigate to a specific frame by filename (from review panel)."""
+        for i, f in enumerate(self._frames):
+            if f["filename"] == filename:
+                self._load_frame_at_row(i)
+                return
+
+    def _open_export_preview(self):
+        """Open the Export Preview dialog for batch export."""
+        if not self._store or not self._folder_path:
+            return
+        from frontend.export_preview_dialog import ExportPreviewDialog
+        default_output = self._folder_path
+        dialog = ExportPreviewDialog(
+            self._store, self._folder_path, default_output, self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.get_result()
+            if result["format"] == "yolo":
+                self._run_yolo_export(result["output_folder"])
+            # COCO export uses the existing per-frame export flow
+
+    def _run_yolo_export(self, output_folder: str):
+        """Run YOLO format export."""
+        try:
+            from backend.yolo_exporter import YOLOExporter
+            exporter = YOLOExporter(
+                self._store, self._folder_path,
+                os.path.join(output_folder, "output_yolo"),
+            )
+            result = exporter.export()
+            self._toast.show_message(
+                t("export.yolo_complete",
+                  frames=result["frames_exported"],
+                  labels=result["labels_exported"]),
+                "success", 4000,
+            )
+        except ImportError:
+            self._toast.show_message(
+                "YOLO export requires PyYAML — pip install pyyaml",
+                "warning", 4000,
+            )
+        except Exception as e:
+            logger.error("YOLO export failed: %s", e, exc_info=True)
+            self._toast.show_message(f"Export failed: {e}", "warning", 4000)
+
     # ── Frame navigation ──
 
     def _load_frame_at_row(self, row: int):
         if not self._frames or row < 0 or row >= len(self._frames):
             return
 
+        # Track stats: start timing for this frame
+        if self._session_stats:
+            self._session_stats.start_frame()
+
         # Save current metadata for inheritance to next unviewed frame
         prev_meta = self._metadata_bar.get_metadata() if self._current_frame else None
 
         self._current_row = row
-        frame_id = self._frames[row]["id"]
-        self._current_frame = self._db.get_frame(frame_id)
+        filename = self._frames[row]["filename"]
+        self._current_filename = filename
+
+        # Load frame annotation from JSON store
+        self._current_frame = self._store.get_frame_annotation(filename)
         if not self._current_frame:
-            return
+            # Create a minimal frame object for brand-new frames
+            self._current_frame = FrameAnnotation(
+                id=None, original_filename=filename,
+                image_width=0, image_height=0,
+                source=self._session_meta.get("source", ""),
+                match_round=self._session_meta.get("match_round", ""),
+                opponent=self._session_meta.get("opponent", ""),
+                weather=self._session_meta.get("weather", "clear"),
+                lighting=self._session_meta.get("lighting", "floodlight"),
+            )
 
         # Load image
-        img_path = os.path.join(self._folder_path, self._current_frame.original_filename)
+        img_path = os.path.join(self._folder_path, filename)
         self._canvas.set_image(img_path)
 
         # Set frame dimensions if not yet set
         if self._current_frame.image_width == 0 and self._canvas._pixmap:
             w = self._canvas._pixmap.width()
             h = self._canvas._pixmap.height()
-            self._db.set_frame_dimensions(self._current_frame.id, w, h)
+            self._store.set_frame_dimensions(filename, w, h)
             self._current_frame.image_width = w
             self._current_frame.image_height = h
 
@@ -533,9 +754,9 @@ class MainWindow(QMainWindow):
         # Metadata inheritance: if frame is unviewed and we have previous metadata,
         # copy it to this frame so consecutive similar frames share metadata.
         if self._current_frame.status == FrameStatus.UNVIEWED and prev_meta:
-            self._db.save_frame_metadata(self._current_frame.id, **prev_meta)
+            self._store.save_frame_metadata(filename, **prev_meta)
             for k, v in prev_meta.items():
-                setattr(self._current_frame, k, v)
+                self._current_frame.metadata[k] = v
 
         # Set metadata bar from frame's dynamic metadata dict
         self._metadata_bar.set_metadata(**self._current_frame.metadata)
@@ -545,7 +766,7 @@ class MainWindow(QMainWindow):
 
         # Mark in-progress
         if self._current_frame.status == FrameStatus.UNVIEWED:
-            self._db.set_frame_status(self._current_frame.id, FrameStatus.IN_PROGRESS)
+            self._store.set_frame_status(filename, FrameStatus.IN_PROGRESS)
             self._current_frame.status = FrameStatus.IN_PROGRESS
             self._frames[row]["status"] = "in_progress"
             self._filmstrip.update_status(row, "in_progress")
@@ -566,9 +787,9 @@ class MainWindow(QMainWindow):
         # Update progress
         self._update_progress()
 
-    def _on_filmstrip_select(self, frame_id: int):
+    def _on_filmstrip_select(self, filename: str):
         for i, f in enumerate(self._frames):
-            if f["id"] == frame_id:
+            if f["filename"] == filename:
                 self._load_frame_at_row(i)
                 return
 
@@ -629,24 +850,25 @@ class MainWindow(QMainWindow):
 
     def _on_auto_skip(self, key: str, value: str):
         """Called when a metadata value triggers auto-skip (e.g. replay, broadcast)."""
-        if not self._current_frame or not self._db:
+        if not self._current_frame or not self._store or not self._current_filename:
             return
         self._save_metadata()
         display = value.replace("_", " ")
         self._toast.show_message(t("toast.auto_skip", display=display), "skip")
-        self._db.set_frame_status(self._current_frame.id, FrameStatus.SKIPPED)
+        self._store.set_frame_status(self._current_filename, FrameStatus.SKIPPED,
+                                     skip_reason=value)
         self._frames[self._current_row]["status"] = "skipped"
         self._filmstrip.update_status(self._current_row, "skipped")
         QTimer.singleShot(400, self._advance_to_next_unviewed)
 
     def _save_metadata(self):
-        if not self._current_frame or not self._db:
+        if not self._current_frame or not self._store or not self._current_filename:
             return
         meta = self._metadata_bar.get_metadata()
-        self._db.save_frame_metadata(self._current_frame.id, **meta)
+        self._store.save_frame_metadata(self._current_filename, **meta)
         # Keep frame object in sync
         for k, v in meta.items():
-            setattr(self._current_frame, k, v)
+            self._current_frame.metadata[k] = v
 
     # ── Box drawing ──
 
@@ -665,7 +887,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _assign_category(self, category: Category):
-        if not self._pending_box or not self._current_frame:
+        if not self._pending_box or not self._current_frame or not self._current_filename:
             return
         x, y, w, h = self._pending_box
         self._pending_box = None
@@ -681,16 +903,16 @@ class MainWindow(QMainWindow):
                 self._toast.show_message(t("toast.box_cancelled"), "warning")
                 return
             jersey, name = popup.get_result()
-            box_id = self._db.add_box(
-                self._current_frame.id, x, y, w, h, category,
+            box_id = self._store.add_box(
+                self._current_filename, x, y, w, h, category,
                 jersey_number=jersey, player_name=name,
             )
         else:
-            box_id = self._db.add_box(
-                self._current_frame.id, x, y, w, h, category,
+            box_id = self._store.add_box(
+                self._current_filename, x, y, w, h, category,
             )
 
-        self._undo_stack.append(box_id)
+        self._undo_stack.append((self._current_filename, box_id))
         self._reload_boxes()
         self._toast.show_message(t("toast.box_added_hint"), "success")
 
@@ -702,25 +924,27 @@ class MainWindow(QMainWindow):
             # Apply to last added box
             if self._current_frame and self._current_frame.boxes:
                 box = self._current_frame.boxes[-1]
-                self._db.update_box(box.id, occlusion=occ)
+                self._store.update_box(self._current_filename, box.id, occlusion=occ)
                 self._reload_boxes()
             return
         box = self._current_frame.boxes[idx]
-        self._db.update_box(box.id, occlusion=occ)
+        self._store.update_box(self._current_filename, box.id, occlusion=occ)
         self._reload_boxes()
 
     def _toggle_truncated(self):
         idx = self._canvas.get_selected_index()
-        if not self._current_frame:
+        if not self._current_frame or not self._current_filename:
             return
         if idx < 0:
             if self._current_frame.boxes:
                 box = self._current_frame.boxes[-1]
-                self._db.update_box(box.id, truncated=not box.truncated)
+                self._store.update_box(self._current_filename, box.id,
+                                       truncated=not box.truncated)
                 self._reload_boxes()
             return
         box = self._current_frame.boxes[idx]
-        self._db.update_box(box.id, truncated=not box.truncated)
+        self._store.update_box(self._current_filename, box.id,
+                               truncated=not box.truncated)
         self._reload_boxes()
 
     # ── Box selection / manipulation ──
@@ -747,37 +971,39 @@ class MainWindow(QMainWindow):
             self._shortcuts.set_popup_open(False)
             if result == PlayerPopup.DialogCode.Accepted:
                 jersey, name = popup.get_result()
-                self._db.update_box(box.id, jersey_number=jersey, player_name=name)
+                self._store.update_box(self._current_filename, box.id,
+                                       jersey_number=jersey, player_name=name)
                 self._reload_boxes()
 
     def _on_box_moved(self, idx, x, y, w, h):
         if not self._current_frame or idx >= len(self._current_frame.boxes):
             return
         box = self._current_frame.boxes[idx]
-        self._db.update_box(box.id, x=x, y=y)
+        self._store.update_box(self._current_filename, box.id, x=x, y=y)
         self._reload_boxes()
 
     def _on_box_resized(self, idx, x, y, w, h):
         if not self._current_frame or idx >= len(self._current_frame.boxes):
             return
         box = self._current_frame.boxes[idx]
-        self._db.update_box(box.id, x=x, y=y, width=w, height=h)
+        self._store.update_box(self._current_filename, box.id,
+                               x=x, y=y, width=w, height=h)
         self._reload_boxes()
 
     def _delete_selected_box(self):
         idx = self._canvas.get_selected_index()
-        if idx < 0 or not self._current_frame:
+        if idx < 0 or not self._current_frame or not self._current_filename:
             return
         box = self._current_frame.boxes[idx]
-        self._db.delete_box(box.id)
+        self._store.delete_box(self._current_filename, box.id)
         self._canvas.clear_selection()
         self._reload_boxes()
 
     def _undo_last_box(self):
         if not self._undo_stack:
             return
-        box_id = self._undo_stack.pop()
-        self._db.delete_box(box_id)
+        filename, box_id = self._undo_stack.pop()
+        self._store.delete_box(filename, box_id)
         self._reload_boxes()
 
     # ── AI-Assisted mode ──
@@ -801,10 +1027,10 @@ class MainWindow(QMainWindow):
             logger.info("AI detection already in progress, skipping")
             return
 
-        img_path = os.path.join(self._folder_path, self._current_frame.original_filename)
+        img_path = os.path.join(self._folder_path, self._current_filename)
         logger.info("Starting AI detection on: %s", img_path)
         self._detecting = True
-        self._detecting_frame_id = self._current_frame.id
+        self._detecting_filename = self._current_filename
 
         # Show progress overlay
         model_name = self._model_manager.model_name if self._model_manager else ""
@@ -839,7 +1065,7 @@ class MainWindow(QMainWindow):
         self._detecting = False
         self._detection_overlay.stop()
         # Verify we're still on the same frame
-        if not self._current_frame or self._current_frame.id != self._detecting_frame_id:
+        if not self._current_filename or self._current_filename != self._detecting_filename:
             logger.info("Frame changed during detection, discarding results")
             return
 
@@ -853,14 +1079,14 @@ class MainWindow(QMainWindow):
 
             if auto_cat is not None:
                 category = Category(auto_cat)
-                self._db.add_box(
-                    self._current_frame.id, x, y, w, h, category,
+                self._store.add_box(
+                    self._current_filename, x, y, w, h, category,
                     source="ai_detected", box_status="finalized",
                     confidence=conf, detected_class=cls_name,
                 )
             else:
-                self._db.add_box(
-                    self._current_frame.id, x, y, w, h, Category.OPPONENT,
+                self._store.add_box(
+                    self._current_filename, x, y, w, h, Category.OPPONENT,
                     source="ai_detected", box_status="pending",
                     confidence=conf, detected_class=cls_name,
                 )
@@ -908,12 +1134,16 @@ class MainWindow(QMainWindow):
                 self._toast.show_message(t("toast.box_cancelled"), "warning")
                 return
             jersey, name = popup.get_result()
-            self._db.update_box(
-                box.id, category=category, box_status="finalized",
+            self._store.update_box(
+                self._current_filename, box.id,
+                category=category, box_status="finalized",
                 jersey_number=jersey, player_name=name,
             )
         else:
-            self._db.update_box(box.id, category=category, box_status="finalized")
+            self._store.update_box(
+                self._current_filename, box.id,
+                category=category, box_status="finalized",
+            )
 
         self._reload_boxes()
         self._toast.show_message(t("ai.box_assigned"), "success")
@@ -933,7 +1163,7 @@ class MainWindow(QMainWindow):
 
     def _on_bulk_assign(self, n: int):
         """Ctrl+N: bulk-assign all pending boxes to category N."""
-        if self._annotation_mode != "ai_assisted" or not self._current_frame:
+        if self._annotation_mode != "ai_assisted" or not self._current_filename:
             return
         if n < 1 or n > 6:
             return
@@ -950,8 +1180,8 @@ class MainWindow(QMainWindow):
                 and category == Category.OPPONENT):
             exclude_cls = "goalkeeper"
 
-        count = self._db.bulk_assign_pending(
-            self._current_frame.id, category, exclude_detected_class=exclude_cls,
+        count = self._store.bulk_assign_pending(
+            self._current_filename, category, exclude_detected_class=exclude_cls,
         )
         if count > 0:
             from backend.models import CATEGORY_NAMES
@@ -965,10 +1195,10 @@ class MainWindow(QMainWindow):
 
     def _on_accept_all(self):
         """Ctrl+A: accept all pending boxes as Opponent after confirmation."""
-        if self._annotation_mode != "ai_assisted" or not self._current_frame:
+        if self._annotation_mode != "ai_assisted" or not self._current_filename:
             return
 
-        pending = self._db.get_pending_box_count(self._current_frame.id)
+        pending = self._store.get_pending_box_count(self._current_filename)
         if pending == 0:
             self._toast.show_message("No pending boxes", "info")
             return
@@ -980,8 +1210,8 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            count = self._db.bulk_assign_pending(
-                self._current_frame.id, Category.OPPONENT,
+            count = self._store.bulk_assign_pending(
+                self._current_filename, Category.OPPONENT,
             )
             self._reload_boxes()
             from backend.models import CATEGORY_NAMES
@@ -992,21 +1222,21 @@ class MainWindow(QMainWindow):
 
     def _re_detect(self):
         """Delete pending AI boxes and re-run detection."""
-        if not self._current_frame or not self._model_manager or self._detecting:
+        if not self._current_filename or not self._model_manager or self._detecting:
             return
-        self._db.delete_ai_pending_boxes(self._current_frame.id)
+        self._store.delete_ai_pending_boxes(self._current_filename)
         self._reload_boxes()
         self._run_ai_detection()
 
     # ── Export / Skip ──
 
     def _export_and_advance(self):
-        if not self._current_frame or not self._exporter:
+        if not self._current_frame or not self._exporter or not self._current_filename:
             return
 
         # AI mode: block export if pending boxes remain
-        if self._annotation_mode == "ai_assisted" and self._db:
-            pending = self._db.get_pending_box_count(self._current_frame.id)
+        if self._annotation_mode == "ai_assisted":
+            pending = self._store.get_pending_box_count(self._current_filename)
             if pending > 0:
                 self._toast.show_message(
                     t("ai.pending_blocks_export", count=pending), "warning", 3000,
@@ -1022,23 +1252,36 @@ class MainWindow(QMainWindow):
             self._toast.show_message(error, "warning")
             return
 
-        # Reload boxes from DB
-        self._current_frame.boxes = self._db.get_boxes(self._current_frame.id)
+        # Reload boxes from store
+        self._current_frame.boxes = self._store.get_boxes(self._current_filename)
 
-        exported = self._exporter.export_frame(self._current_frame, self._session_id)
+        exported = self._exporter.export_frame(self._current_frame, self._current_filename)
+        self._store.set_frame_status(self._current_filename, FrameStatus.ANNOTATED)
+        self._store.set_exported_filename(self._current_filename, exported)
         self._frames[self._current_row]["status"] = "annotated"
         self._filmstrip.update_status(self._current_row, "annotated")
         self._toast.show_message(t("toast.exported", exported=exported), "success")
+
+        # Track stats + backup
+        if self._session_stats:
+            self._session_stats.finish_frame(was_annotated=True)
+        self._notify_backup_on_save()
+
         self._update_progress()
         QTimer.singleShot(300, self._advance_to_next_unviewed)
 
     def _skip_and_advance(self):
-        if not self._current_frame or not self._db:
+        if not self._current_filename or not self._store:
             return
-        self._db.set_frame_status(self._current_frame.id, FrameStatus.SKIPPED)
+        self._store.set_frame_status(self._current_filename, FrameStatus.SKIPPED,
+                                     skip_reason="manual")
         self._frames[self._current_row]["status"] = "skipped"
         self._filmstrip.update_status(self._current_row, "skipped")
         self._toast.show_message(t("toast.frame_skipped"), "skip")
+
+        # Track stats
+        if self._session_stats:
+            self._session_stats.finish_frame(was_annotated=False)
         QTimer.singleShot(300, self._advance_to_next_unviewed)
 
     def _force_save(self):
@@ -1048,45 +1291,61 @@ class MainWindow(QMainWindow):
     # ── Helpers ──
 
     def _reload_boxes(self):
-        if not self._current_frame:
+        if not self._current_filename or not self._store:
             return
-        self._current_frame.boxes = self._db.get_boxes(self._current_frame.id)
+        self._current_frame.boxes = self._store.get_boxes(self._current_filename)
         self._canvas.set_boxes(self._current_frame.boxes)
         self._annotation_panel.update_boxes(self._current_frame.boxes)
 
     def _update_progress(self):
-        if not self._db or not self._session_id:
+        if not self._store:
             return
-        stats = self._db.get_session_stats(self._session_id)
-        remaining = stats["unviewed"] + stats["in_progress"]
+        stats = self._store.get_session_stats()
+        # Include frames without JSON (brand new) as unviewed
+        total_from_scan = len(self._frames)
+        unviewed = total_from_scan - stats["total"] + stats.get("unviewed", 0)
+        remaining = unviewed + stats.get("in_progress", 0)
         self._progress.update_progress(
-            self._current_row + 1, stats["total"],
+            self._current_row + 1, total_from_scan,
             stats["annotated"], stats["skipped"], remaining,
         )
 
     def _show_completion_dialog(self):
-        output_path = os.path.join(self._folder_path, "output")
-        stats = self._db.get_session_stats(self._session_id)
-        msg = QMessageBox(self)
-        msg.setWindowTitle(t("dialog.completion_title"))
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setText(t("dialog.completion_message"))
-        msg.setInformativeText(
-            t("completion.annotated", annotated=stats["annotated"], skipped=stats["skipped"])
-            + "\n\n"
-            + t("completion.output_path", path=output_path)
-            + "\n\n"
-            + t("completion.folder_list")
-        )
-        msg.setStyleSheet("QMessageBox { background: #2A2A2A; } "
-                          "QLabel { color: #EEE; font-size: 13px; }")
-        msg.exec()
+        # Show the rich session summary dialog if stats available
+        if self._session_stats:
+            dialog = SessionSummaryDialog(self._session_stats, self)
+            dialog.exec()
+        else:
+            output_path = os.path.join(self._folder_path, "output")
+            stats = self._store.get_session_stats()
+            msg = QMessageBox(self)
+            msg.setWindowTitle(t("dialog.completion_title"))
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText(t("dialog.completion_message"))
+            msg.setInformativeText(
+                t("completion.annotated", annotated=stats["annotated"], skipped=stats["skipped"])
+                + "\n\n"
+                + t("completion.output_path", path=output_path)
+                + "\n\n"
+                + t("completion.folder_list")
+            )
+            msg.setStyleSheet("QMessageBox { background: #2A2A2A; } "
+                              "QLabel { color: #EEE; font-size: 13px; }")
+            msg.exec()
 
     def closeEvent(self, event):
         # Stop any running detection thread
         if self._detection_thread and self._detection_thread.isRunning():
             self._detection_thread.quit()
             self._detection_thread.wait(3000)
-        if self._db:
-            self._db.close()
+        # Stop backup timer
+        if self._backup_timer:
+            self._backup_timer.stop()
+        # Create final backup on close
+        if self._backup_manager:
+            self._backup_manager.create_backup(reason="session_close")
+        # Mark clean exit
+        if self._state_db:
+            self._state_db.save_clean_exit(True)
+            self._state_db.close()
         super().closeEvent(event)

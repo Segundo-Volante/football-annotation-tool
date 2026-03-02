@@ -4,7 +4,7 @@ import unicodedata
 from pathlib import Path
 from typing import Optional
 
-from backend.database import DatabaseManager
+from backend.annotation_store import AnnotationStore
 from backend.file_manager import FileManager
 from backend.models import (
     BoundingBox, Category, CATEGORY_NAMES, FrameAnnotation, FrameStatus,
@@ -40,10 +40,10 @@ def _extract_lastname(full_name: str) -> str:
 
 
 class Exporter:
-    def __init__(self, db: DatabaseManager, input_folder: str | Path,
+    def __init__(self, store: AnnotationStore, input_folder: str | Path,
                  output_folder: str | Path, team_name: str = "Home Team",
                  has_opponent_roster: bool = False):
-        self.db = db
+        self.store = store
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
         self._team_name = team_name
@@ -58,8 +58,9 @@ class Exporter:
                 return f"Set {key.replace('_', ' ')} before exporting"
         return None
 
-    def export_frame(self, frame: FrameAnnotation, session_id: int) -> str:
-        seq = self.db.get_next_seq(session_id)
+    def export_frame(self, frame: FrameAnnotation, filename: str) -> str:
+        """Export a single frame.  Returns the exported filename."""
+        seq = self.store.get_next_seq()
         exported_name = self._build_frame_name(frame, seq)
 
         # 1. Copy original frame
@@ -82,11 +83,10 @@ class Exporter:
         self._update_combined_dataset(coco_data)
 
         # 5. Update summary
-        self._update_summary(session_id)
+        self._update_summary()
 
-        # 6. Mark frame as annotated
-        self.db.set_frame_status(frame.id, FrameStatus.ANNOTATED)
-        self.db.set_exported_filename(frame.id, exported_name)
+        # Note: frame status + exported_filename updates are done by the caller
+        # (MainWindow) via AnnotationStore, not here.
 
         return exported_name
 
@@ -224,34 +224,42 @@ class Exporter:
             json.dumps(dataset, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
-    def _update_summary(self, session_id: int):
-        stats = self.db.get_session_stats(session_id)
-        session = self.db.get_session(session_id)
+    def _update_summary(self):
+        """Update the summary.json using data from the annotation store."""
+        stats = self.store.get_session_stats()
 
-        rows = self.db.conn.execute(
-            "SELECT b.category, b.jersey_number, b.player_name, COUNT(*) as cnt "
-            "FROM boxes b JOIN frames f ON b.frame_id = f.id "
-            "WHERE f.session_id = ? AND f.status = 'annotated' "
-            "GROUP BY b.category, b.jersey_number, b.player_name",
-            (session_id,),
-        ).fetchall()
-
+        # Aggregate box counts from all annotated frames
         by_category = {}
         by_player = {}
         total_boxes = 0
-        for r in rows:
-            cat_name = CATEGORY_NAMES.get(Category(r["category"]), "unknown")
-            by_category[cat_name] = by_category.get(cat_name, 0) + r["cnt"]
-            total_boxes += r["cnt"]
-            if r["jersey_number"] is not None and r["player_name"]:
-                key = f"{r['jersey_number']:02d}_{_extract_lastname(r['player_name'])}"
-                by_player[key] = by_player.get(key, 0) + r["cnt"]
+
+        for frame in self.store.iter_all_frames():
+            if frame.status != FrameStatus.ANNOTATED:
+                continue
+            for box in frame.boxes:
+                cat_name = CATEGORY_NAMES.get(box.category, "unknown")
+                by_category[cat_name] = by_category.get(cat_name, 0) + 1
+                total_boxes += 1
+                if box.jersey_number is not None and box.player_name:
+                    key = f"{box.jersey_number:02d}_{_extract_lastname(box.player_name)}"
+                    by_player[key] = by_player.get(key, 0) + 1
+
+        # Get session metadata from any annotated frame
+        source = ""
+        match_round = ""
+        opponent = ""
+        for frame in self.store.iter_all_frames():
+            if frame.source:
+                source = frame.source
+                match_round = frame.match_round or ""
+                opponent = frame.opponent or ""
+                break
 
         summary = {
             "session": {
-                "source": session["source"] if session else "",
-                "round": session["match_round"] if session else "",
-                "opponent": session["opponent"] if session else "",
+                "source": source,
+                "round": match_round,
+                "opponent": opponent,
                 "team": self._team_name,
             },
             "frames": {

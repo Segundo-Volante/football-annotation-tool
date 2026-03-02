@@ -18,7 +18,7 @@ THUMB_HEIGHT = 56
 
 
 class Filmstrip(QWidget):
-    frame_selected = pyqtSignal(int)  # emits frame DB id
+    frame_selected = pyqtSignal(str)  # emits filename (was int DB id)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,16 +44,17 @@ class Filmstrip(QWidget):
         self._list.currentRowChanged.connect(self._on_row_changed)
         layout.addWidget(self._list)
 
-        self._frame_ids: list[int] = []
+        self._filenames: list[str] = []
 
     def load_frames(self, frames: list[dict], folder_path: str):
         self._list.blockSignals(True)
         self._list.clear()
-        self._frame_ids.clear()
+        self._filenames.clear()
 
         for f in frames:
             item = QListWidgetItem()
-            item.setText(f["original_filename"])
+            filename = f.get("original_filename") or f.get("filename", "")
+            item.setText(filename)
             item.setForeground(QColor("#EEE"))
             status = f.get("status", "unviewed")
             bg = STATUS_COLORS.get(status, STATUS_COLORS["unviewed"])
@@ -61,7 +62,7 @@ class Filmstrip(QWidget):
 
             # Load thumbnail
             import os
-            img_path = os.path.join(folder_path, f["original_filename"])
+            img_path = os.path.join(folder_path, filename)
             pix = QPixmap(img_path)
             if not pix.isNull():
                 pix = pix.scaled(THUMB_WIDTH, THUMB_HEIGHT,
@@ -71,7 +72,7 @@ class Filmstrip(QWidget):
 
             item.setSizeHint(QSize(THUMB_WIDTH + 20, THUMB_HEIGHT + 24))
             self._list.addItem(item)
-            self._frame_ids.append(f["id"])
+            self._filenames.append(filename)
 
         self._count_label.setText(t("filmstrip.frame_count", count=len(frames)))
         self._list.blockSignals(False)
@@ -80,7 +81,9 @@ class Filmstrip(QWidget):
         self._list.blockSignals(True)
         self._list.setCurrentRow(row)
         self._list.blockSignals(False)
-        self._list.scrollToItem(self._list.item(row))
+        item = self._list.item(row)
+        if item:
+            self._list.scrollToItem(item)
 
     def update_status(self, row: int, status: str):
         item = self._list.item(row)
@@ -96,13 +99,13 @@ class Filmstrip(QWidget):
                 item.setBackground(STATUS_COLORS["in_progress"])
 
     def _on_row_changed(self, row: int):
-        if 0 <= row < len(self._frame_ids):
-            self.frame_selected.emit(self._frame_ids[row])
+        if 0 <= row < len(self._filenames):
+            self.frame_selected.emit(self._filenames[row])
 
-    def get_frame_id(self, row: int) -> int:
-        if 0 <= row < len(self._frame_ids):
-            return self._frame_ids[row]
-        return -1
+    def get_filename(self, row: int) -> str:
+        if 0 <= row < len(self._filenames):
+            return self._filenames[row]
+        return ""
 
     def current_row(self) -> int:
         return self._list.currentRow()

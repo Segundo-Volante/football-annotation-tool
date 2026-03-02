@@ -39,6 +39,11 @@ class ShortcutHandler(QObject):
     bulk_assign = pyqtSignal(int)        # Ctrl+1 through Ctrl+6
     accept_all = pyqtSignal()            # Ctrl+A
 
+    # Dashboard / Review / Export
+    open_health = pyqtSignal()           # Ctrl+H
+    open_review = pyqtSignal()           # Ctrl+R
+    open_export_preview = pyqtSignal()   # Ctrl+E
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._popup_open = False
@@ -76,6 +81,19 @@ class ShortcutHandler(QObject):
         # Ctrl+A → accept all pending as opponent
         if ctrl and key == Qt.Key.Key_A:
             self.accept_all.emit()
+            return True
+
+        # Ctrl+H → health dashboard
+        if ctrl and key == Qt.Key.Key_H:
+            self.open_health.emit()
+            return True
+        # Ctrl+R → review panel
+        if ctrl and key == Qt.Key.Key_R:
+            self.open_review.emit()
+            return True
+        # Ctrl+E → export preview
+        if ctrl and key == Qt.Key.Key_E:
+            self.open_export_preview.emit()
             return True
 
         # Tab / Shift+Tab → cycle metadata dimension
