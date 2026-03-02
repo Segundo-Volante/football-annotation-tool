@@ -138,7 +138,9 @@ pip install -r requirements-ai.txt
 2. In the session dialog, select **AI-Assisted** for Annotation Mode
 3. Choose a detection model from the dropdown (see model tiers below)
 4. Set a confidence threshold (default 0.30 -- lower = more detections, higher = fewer but more accurate)
-5. Click OK to start the session
+5. Click **Start Annotating** to begin the session
+
+![AI Session Dialog](screenshots/ai_session_dialog.png)
 
 #### Available Models (3 tiers)
 
@@ -158,6 +160,10 @@ python main.py
 **COCO models** work out of the box -- no API key needed. Model weights are auto-downloaded on first use (~6-50 MB depending on size). See [models.txt](models.txt) for instructions on pre-downloading.
 
 #### Workflow
+
+![AI Detection Example -- LaLiga](screenshots/ai_detection_example1.png)
+
+![AI Detection Example -- Away Match](screenshots/ai_detection_example2.png)
 
 1. **Navigate to a frame** -- AI detections appear automatically as **amber dashed boxes** labeled with class and confidence (e.g. "? person (0.92)"). A progress overlay shows the model name and elapsed time during detection.
 2. **Review detections** -- Click any amber box to select it. **Drag corners** to resize, or **drag the center** to move it. Delete incorrect detections with `Delete`.
