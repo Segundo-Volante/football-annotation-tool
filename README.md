@@ -1,12 +1,13 @@
 # Football Annotation Tool
 
-A keyboard-driven PyQt6 desktop application for annotating football broadcast frames. Generates **RT-DETR training data** (COCO JSON + renamed frames) and **BoT-SORT Re-ID crops** (per-player cropped images) for player tracking. Works with **any team** and **any league** -- configure your team, roster, and competitions through the setup wizard.
+A keyboard-driven PyQt6 desktop application for annotating football broadcast frames. Generates **RT-DETR training data** (COCO JSON + YOLO TXT) and **BoT-SORT Re-ID crops** for player tracking. Works with **any team** and **any league**.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
+![Tests](https://img.shields.io/badge/Tests-139_passing-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
----
+![Main Annotation View](screenshots/main_annotation_view.png)
 
 > I just wanted to create something that lets more people who are truly passionate about football AI focus on what matters, without getting stuck in tedious technical details. You can annotate your data quickly and jump straight into building models.
 >
@@ -14,61 +15,89 @@ A keyboard-driven PyQt6 desktop application for annotating football broadcast fr
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+  - [First-Run Setup](#step-0----first-run-setup)
+  - [Annotate Frames](#step-1----annotate-frames)
+  - [Frame Metadata](#step-2----set-frame-metadata-tab--number-system)
+  - [Export or Skip](#step-3----export-or-skip)
+- [AI-Assisted Mode](#ai-assisted-mode-optional)
+- [Team Collaboration](#team-collaboration)
+- [Tools](#tools)
+  - [Health Dashboard](#health-dashboard-ctrlh)
+  - [Review & Batch Edit](#review--batch-edit-ctrlr)
+  - [Export Preview](#export-preview-ctrle)
+- [Output Structure](#output-structure)
+- [Architecture](#architecture)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Documentation](#documentation)
+
+---
+
 ## Features
 
-- **First-run setup wizard** -- Configure team name, season, roster CSV, and competitions on first launch
-- **Project config system** -- `config/project.json` stores team, categories, and competitions; `config/teams/` manages home and opponent rosters
-- **Multi-language support** -- English, Italian, German, Portuguese, and French (set in `project.json`)
-- **Session dialog** -- Configure folder, roster CSV, competition, round, opponent, weather, and lighting per session
-- **Tab + Number metadata system** -- Dynamic frame-level dimensions loaded from `config/metadata_options.json`
-- **Bounding box annotation** -- Draw, move, resize boxes with category-colored outlines and pending box prompts
-- **CSV roster system** -- Load any team's roster from a simple CSV file; auto-detect opponent rosters from `config/teams/opponents/`
-- **Player roster auto-fill** -- Type a jersey number and the player name fills automatically from the loaded roster
-- **Opponent roster integration** -- Drop opponent CSV files in `config/teams/opponents/` for named crop folders
-- **Auto-skip** -- Frames tagged as replay, broadcast, crowd, overlay_heavy, or transition are skipped instantly
-- **Metadata inheritance** -- Consecutive frames inherit the previous frame's metadata automatically
-- **Real-time persistence** -- SQLite database with WAL mode saves every action; resume any session by reopening its folder
-- **COCO JSON export** -- Per-frame annotations, combined dataset, cropped player images, and summary statistics
-- **Dynamic metadata storage** -- Frame metadata stored as JSON blob in SQLite with `in_filename` flag controlling export naming
-- **AI-assisted annotation mode** -- Optional YOLO/RT-DETR object detection auto-detects players and ball; review, correct, and assign identities in seconds
-- **Team collaboration** -- Five workflow options: Solo, Split & Merge, Shared Folder, Git-based, and Custom for multi-person annotation projects
-- **Health Dashboard** -- Real-time annotation quality checks: missing boxes, duplicate frames, jersey conflicts, and category distribution
-- **Review & Batch Edit** -- Search, filter, and bulk-edit annotations across all frames with batch jersey reassignment
-- **Export Preview** -- Choose between COCO JSON and YOLO TXT formats with output structure preview before exporting
-- **YOLO TXT export** -- In addition to COCO JSON, export annotations in YOLO format with `data.yaml` for direct model training
-- **139 passing tests** covering models, database, file manager, exporter, project config, i18n, AI features, and collaboration
+**Annotation**
+- Draw, move, and resize bounding boxes with category-colored outlines
+- Keyboard-first workflow -- every action mapped to a key (5-10s per frame)
+- Player roster auto-fill from CSV (type jersey number, name fills automatically)
+- 6 configurable metadata dimensions per frame (shot, camera, ball, situation, zone, quality)
+- Auto-skip for non-actionable frames (replays, broadcasts, crowd shots)
+
+**AI-Assisted Mode**
+- Optional YOLO/RT-DETR object detection auto-detects players, referees, and ball
+- Reduces per-frame time from ~30-60s to ~5-10s
+- Bulk assign categories with `Ctrl+1-6` or accept all with `Ctrl+A`
+- Supports football-specific, COCO generic, and custom models
+
+**Team Collaboration**
+- Five workflow options: Solo, Split & Merge, Shared Folder, Git, and Custom
+- Frame splitting with configurable ranges per annotator
+- Merge with conflict resolution (keep first / latest / most boxes)
+- Built-in Git interface with clone, connect, commit, push, and pull
+
+**Quality & Review**
+- Health Dashboard -- frame/box statistics, issue detection, category distribution
+- Review & Batch Edit -- search, filter, and bulk-edit annotations across all frames
+- Export Preview -- choose format and preview output structure before exporting
+- Real-time stats bar with annotation speed, ETA, and session metrics
+
+**Export & Persistence**
+- COCO JSON export with per-frame annotations, combined dataset, and Re-ID crops
+- YOLO TXT export with `data.yaml` for direct model training
+- SQLite with WAL mode -- crash-safe, real-time auto-save, resume any session
+- Dynamic metadata in exported filenames (competition, round, weather, etc.)
+
+**Configuration**
+- First-run setup wizard for team, season, roster, and competitions
+- Multi-language support (English, Italian, German, Portuguese, French, Spanish)
+- Config-driven categories, metadata dimensions, and competitions (JSON files)
+- Opponent roster auto-detection from `config/teams/opponents/`
+
+---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.10+
-- pip
-
-### Installation
-
 ```bash
+# Clone and install
 git clone https://github.com/Segundo-Volante/football-annotation-tool.git
 cd football-annotation-tool
 pip install -r requirements.txt
 
 # Optional: enable AI-assisted annotation mode
 pip install -r requirements-ai.txt
-```
 
-### Run
-
-```bash
+# Run
 python main.py
+
+# Run tests
+python -m pytest tests/ -v
 ```
 
 On first launch, the **setup wizard** guides you through team configuration. After that, the **session dialog** opens for each annotation session.
-
-### Run Tests
-
-```bash
-python -m pytest tests/ -v
-```
 
 ---
 
@@ -88,9 +117,18 @@ The wizard creates `config/project.json` with your team configuration and catego
 
 The main workspace shows the current frame with a **filmstrip** on the left for navigation, the **annotation panel** on the right, and the **metadata bar** at the bottom. Click and drag anywhere on the frame to draw a bounding box around a player, referee, or the ball. An amber dashed box appears -- press a number key **1-6** to assign it a category.
 
-![Annotation View](screenshots/main_annotation_view.png)
+Each bounding box is **color-coded by category**:
 
-Each bounding box is **color-coded by category**: red for home players, blue for opponents, orange for home GK, dark blue for opponent GK, yellow for referees, and green for the ball. For home team players (keys 1 and 3), a popup asks for the jersey number -- the player name auto-fills from the loaded roster CSV. For opponent players (keys 2 and 4), the popup appears only when an opponent roster CSV is available.
+| Key | Category | Color |
+|-----|----------|-------|
+| 1 | Home Player | Red |
+| 2 | Opponent | Blue |
+| 3 | Home GK | Orange |
+| 4 | Opponent GK | Dark Blue |
+| 5 | Referee | Yellow |
+| 6 | Ball | Green |
+
+For home team players (keys 1 and 3), a popup asks for the jersey number -- the player name auto-fills from the loaded roster CSV. For opponent players (keys 2 and 4), the popup appears only when an opponent roster CSV is available.
 
 The **right panel** lists every box on the current frame with the player's jersey number, name, and occlusion status. Click any entry to select it on the canvas. Double-click to edit player info. Use `Delete` to remove a box or `Ctrl+Z` to undo.
 
@@ -100,7 +138,10 @@ The **right panel** lists every box on the current frame with the player's jerse
 
 Each frame has **6 metadata dimensions** (configurable in `config/metadata_options.json`). Press **Tab** to cycle to the next dimension (or **Shift+Tab** to go back). The active dimension is highlighted with an **amber border**. Then press a **number key (1-9)** to pick an option -- the selected value turns **bold amber**.
 
-Dimensions with `"in_filename": true` are included in exported filenames. Dimensions with `"in_filename": false` are stored in the COCO JSON only.
+Dimensions with `"in_filename": true` are included in exported filenames. Dimensions with `"in_filename": false` are stored in the COCO JSON only. Metadata **carries over** automatically between consecutive frames -- only change what's different. Values shown in **red** trigger **auto-skip**, which instantly skips the frame and advances to the next one.
+
+<details>
+<summary><b>View all 6 metadata dimensions</b></summary>
 
 **SHOT** -- Describes the camera framing. Options in red (replay, broadcast, crowd) trigger auto-skip.
 
@@ -126,17 +167,17 @@ Dimensions with `"in_filename": true` are included in exported filenames. Dimens
 
 ![Metadata - Frame Quality](screenshots/metadata_quality.png)
 
-Metadata **carries over** automatically between consecutive frames -- only change what's different. Values shown in **red** trigger **auto-skip**, which instantly skips the frame and advances to the next one.
+</details>
 
 ### Step 3 -- Export or Skip
 
 Once all boxes are drawn and metadata is set, press **Enter** to export the frame or **Esc** to skip it.
 
-### AI-Assisted Mode (Optional)
+---
+
+## AI-Assisted Mode (Optional)
 
 When `requirements-ai.txt` is installed, the session dialog offers an **AI-Assisted** annotation mode. Instead of drawing every bounding box manually, an object detection model auto-detects players, goalkeepers, referees, and the ball on each frame. You then review, resize, and assign identities -- reducing per-frame annotation time from ~30-60s to ~5-10s.
-
-#### Installation
 
 ```bash
 # Install AI dependencies (PyTorch, ultralytics, etc.)
@@ -145,7 +186,7 @@ pip install -r requirements-ai.txt
 
 > See **[models.txt](models.txt)** for a detailed guide on available models, pre-downloading weights, and choosing the right model for your use case.
 
-#### Setup
+### Setup
 
 1. Launch the app with `python main.py`
 2. In the session dialog, select **AI-Assisted** for Annotation Mode
@@ -155,7 +196,7 @@ pip install -r requirements-ai.txt
 
 ![AI Session Dialog](screenshots/ai_session_dialog.png)
 
-#### Available Models (3 tiers)
+### Available Models (3 tiers)
 
 | Tier | Models | Classes | Download | Notes |
 |------|--------|---------|----------|-------|
@@ -172,7 +213,7 @@ python main.py
 
 **COCO models** work out of the box -- no API key needed. Model weights are auto-downloaded on first use (~6-50 MB depending on size). See [models.txt](models.txt) for instructions on pre-downloading.
 
-#### Workflow
+### Workflow
 
 ![AI Detection Example -- LaLiga](screenshots/ai_detection_example1.png)
 
@@ -187,14 +228,16 @@ python main.py
 7. **Export** -- Press **Enter** to export. Export is blocked while pending (unassigned) boxes remain.
 8. **Re-detect** -- Click **Re-detect** in the AI status bar to clear pending boxes and re-run detection on the current frame.
 
-#### Performance Notes
+### Performance Notes
 
 - **First frame is slower** (~5-20s) because the model loads into memory. Subsequent frames are much faster (~0.5-3s).
 - Detection runs in a **background thread** -- the UI stays responsive with a progress overlay.
 - On Apple Silicon Macs running x86 Python (Rosetta 2), model loading may take longer. For best performance, use an ARM-native Python installation.
 - **Nano** models are fastest, **Medium** models are most accurate. Start with Nano for large batches.
 
-### Team Collaboration
+---
+
+## Team Collaboration
 
 The tool supports multi-person annotation projects with five collaboration workflows. Open **Settings > Collaboration** (or `Ctrl+Shift+C`) to configure.
 
@@ -208,7 +251,7 @@ The tool supports multi-person annotation projects with five collaboration workf
 | **Git** | Version-controlled collaboration with branching, commits, and push/pull through a built-in Git interface. |
 | **Custom** | Define your own workflow with custom instructions for your team. |
 
-#### Split & Merge
+### Split & Merge
 
 Divide frames across annotators by count or percentage. Each person works on their assigned range, then merge all annotations back together.
 
@@ -218,7 +261,7 @@ When merging, the tool detects conflicts (frames annotated by multiple people) a
 
 ![Merge Annotations](screenshots/split_merge_annotations.png)
 
-#### Shared Folder
+### Shared Folder
 
 Connect a cloud-synced folder as your shared workspace. The setup guide walks through configuration for Google Drive, OneDrive, or Dropbox.
 
@@ -226,7 +269,7 @@ Connect a cloud-synced folder as your shared workspace. The setup guide walks th
 
 ![Shared Folder Guide](screenshots/shared_folder_guide.png)
 
-#### Git Collaboration
+### Git Collaboration
 
 Set up your identity, then clone a remote repository or connect an existing local repo. The built-in Git interface handles commits, pushes, and pulls.
 
@@ -236,13 +279,15 @@ Set up your identity, then clone a remote repository or connect an existing loca
 
 ![Connect Repository](screenshots/git_connect_repo.png)
 
-### Tools
+---
 
-Access built-in tools from the **Tools** menu (or their keyboard shortcuts) to monitor annotation quality, review your work, and export datasets.
+## Tools
+
+Access built-in tools from the **Tools** menu to monitor annotation quality, review your work, and export datasets.
 
 ![Tools Menu](screenshots/tools_menu.png)
 
-#### Health Dashboard (`Ctrl+H`)
+### Health Dashboard (`Ctrl+H`)
 
 Real-time annotation quality analysis. The Overview tab shows frame and bounding box statistics. The Issues tab flags problems like missing boxes, duplicate frames, and jersey conflicts. The Distribution tab shows category and jersey number breakdowns.
 
@@ -252,13 +297,13 @@ Real-time annotation quality analysis. The Overview tab shows frame and bounding
 
 ![Health Dashboard -- Distribution](screenshots/health_dashboard_distribution.png)
 
-#### Review & Batch Edit (`Ctrl+R`)
+### Review & Batch Edit (`Ctrl+R`)
 
 Search and filter annotations across all frames. Jump to any frame directly from the results. Use batch edit to reassign jersey numbers across multiple frames at once.
 
 ![Review Panel](screenshots/review_panel.png)
 
-#### Export Preview (`Ctrl+E`)
+### Export Preview (`Ctrl+E`)
 
 Preview what will be exported before running the export. Choose between **COCO JSON** and **YOLO TXT** formats, set the output folder, and see the exact file structure that will be generated.
 
@@ -266,41 +311,9 @@ Preview what will be exported before running the export. Choose between **COCO J
 
 ---
 
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Tab` / `Shift+Tab` | Cycle metadata dimension |
-| `1-9` (no pending box) | Select metadata option |
-| `1-6` (pending box) | Assign box category |
-| `1-6` (AI pending selected) | Assign category to AI box |
-| `F` / `G` / `H` | Occlusion: visible / partial / heavy |
-| `T` | Toggle truncated |
-| `Enter` | Export frame + advance |
-| `Esc` | Skip frame + advance |
-| `Left` / `Right` | Previous / next frame |
-| `Ctrl+Z` | Undo last box |
-| `Delete` | Delete selected box |
-| `Ctrl+S` | Force save |
-| `Ctrl+1-6` | Bulk assign all pending as category (AI mode) |
-| `Ctrl+A` | Accept all pending as Opponent (AI mode) |
-| `Ctrl+H` | Open Health Dashboard |
-| `Ctrl+R` | Open Review & Batch Edit |
-| `Ctrl+E` | Open Export Preview |
-| `Ctrl+Shift+C` | Open Collaboration Settings |
-
-## Categories
-
-| Key | Category | Color |
-|-----|----------|-------|
-| 1 | Home Player | Red |
-| 2 | Opponent | Blue |
-| 3 | Home GK | Orange |
-| 4 | Opponent GK | Dark Blue |
-| 5 | Referee | Yellow |
-| 6 | Ball | Green |
-
 ## Output Structure
+
+### COCO JSON (default)
 
 ```
 your-folder/
@@ -319,6 +332,16 @@ your-folder/
     └── summary.json       # Annotation statistics
 ```
 
+### YOLO TXT
+
+```
+your-folder/
+└── output_yolo/
+    ├── images/train/      # Image files
+    ├── labels/train/      # YOLO .txt labels (class_id x_center y_center w h)
+    └── data.yaml          # Dataset config for training
+```
+
 ### File Naming
 
 Only metadata dimensions with `"in_filename": true` appear in the filename:
@@ -329,7 +352,9 @@ Only metadata dimensions with `"in_filename": true` appear in the filename:
 
 Example: `LaLiga_R15_clear_floodlight_wide_static_open-play_0001.png`
 
+---
 
+## Architecture
 
 ### Data Flow
 
@@ -365,21 +390,124 @@ Database creates session ──▶ FileManager scans folder ──▶ frames loa
 └───────────────────────────────────────────────────────────┘
   │
   ▼
-Exporter reads DB ──▶ COCO JSON + renamed frames + Re-ID crops
+Exporter reads DB ──▶ COCO JSON / YOLO TXT + renamed frames + Re-ID crops
 ```
 
 ### Key Design Decisions
 
-- **Keyboard-first** -- Every action is mapped to a key. Mouse is only used for drawing and resizing boxes. This keeps annotation speed at 5-10 seconds per frame.
-- **SQLite with WAL mode** -- All annotations auto-save in real time. Crash-safe. Resume any session by reopening its folder.
-- **Metadata as JSON blob** -- Frame-level metadata is stored as a flexible JSON column, making it easy to add new dimensions without schema migrations.
-- **AI is optional** -- The core tool works without any AI dependencies. Install `requirements-ai.txt` only if you want auto-detection.
-- **Background-thread detection** -- YOLO inference runs on a separate QThread so the UI never freezes during AI detection.
-- **Config-driven** -- Categories, metadata dimensions, competitions, and languages are all defined in JSON config files. No code changes needed to customize.
+| Decision | Rationale |
+|----------|-----------|
+| **Keyboard-first** | Every action is mapped to a key. Mouse is only for drawing/resizing boxes. Keeps annotation speed at 5-10 seconds per frame. |
+| **SQLite + WAL mode** | All annotations auto-save in real time. Crash-safe. Resume any session by reopening its folder. |
+| **Metadata as JSON blob** | Flexible JSON column makes it easy to add new dimensions without schema migrations. |
+| **AI is optional** | Core tool works without AI dependencies. Install `requirements-ai.txt` only if you want auto-detection. |
+| **Background-thread detection** | YOLO inference runs on a separate QThread so the UI never freezes during detection. |
+| **Config-driven** | Categories, metadata, competitions, and languages are all JSON config files. No code changes needed to customize. |
+
+---
+
+## Keyboard Shortcuts
+
+### Annotation
+
+| Key | Action |
+|-----|--------|
+| `1-6` (pending box) | Assign box category |
+| `F` / `G` / `H` | Occlusion: visible / partial / heavy |
+| `T` | Toggle truncated |
+| `Ctrl+Z` | Undo last box |
+| `Delete` | Delete selected box |
+| `Ctrl+S` | Force save |
+
+### Metadata
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Cycle metadata dimension |
+| `1-9` (no pending box) | Select metadata option |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Export frame + advance |
+| `Esc` | Skip frame + advance |
+| `Left` / `Right` | Previous / next frame |
+
+### AI Mode
+
+| Key | Action |
+|-----|--------|
+| `1-6` (AI pending selected) | Assign category to AI box |
+| `Ctrl+1-6` | Bulk assign all pending as category |
+| `Ctrl+A` | Accept all pending as Opponent |
+
+### Tools & Settings
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+H` | Open Health Dashboard |
+| `Ctrl+R` | Open Review & Batch Edit |
+| `Ctrl+E` | Open Export Preview |
+| `Ctrl+Shift+C` | Open Collaboration Settings |
+
+---
+
+## Configuration
+
+### Project Config (`config/project.json`)
+
+Created by the setup wizard on first run. Contains:
+
+```json
+{
+  "team_name": "FC Barcelona",
+  "season": "2024-25",
+  "language": "en",
+  "competitions": ["LaLiga", "UCL", "CopadelRey"],
+  "categories": [
+    {"id": 0, "key": "home_player", "label": "{home} Player", "color": "#E53935", "roster": "home"},
+    {"id": 1, "key": "opponent", "label": "Opponent", "color": "#1E88E5", "roster": "opponent_auto"}
+  ]
+}
+```
+
+The `{home}` placeholder in category labels is replaced with `team_name` at runtime.
+
+### Roster (CSV)
+
+Create a CSV with 4 columns for any team:
+
+```csv
+team,season,number,name
+Manchester City,2024-25,9,Erling Haaland
+Manchester City,2024-25,17,Kevin De Bruyne
+```
+
+**Home roster**: Set via `config/teams/home.json` or selected in the session dialog.
+
+**Opponent rosters**: Drop CSV files in `config/teams/opponents/` named as `Team_Name.csv` (underscores become spaces in the UI). The session dialog shows a dropdown of available opponents.
+
+### Metadata Options
+
+Edit `config/metadata_options.json` to customize metadata dimensions. Each dimension has:
+- `key`: Internal identifier
+- `label`: Display name in the UI
+- `options`: Available values
+- `default`: Default value for new frames
+- `auto_skip`: Values that trigger automatic frame skipping
+- `in_filename`: Whether this dimension appears in exported filenames
+
+### Multi-Language Support
+
+Set `"language"` in `config/project.json` to one of: `en`, `it`, `de`, `pt`, `fr`, `es`. Add new languages by creating a JSON file in `config/i18n/` with the same keys as `en.json`.
 
 ---
 
 ## Project Structure
+
+<details>
+<summary><b>View full project tree</b></summary>
 
 ```
 football-annotation-tool/
@@ -441,54 +569,9 @@ football-annotation-tool/
 └── requirements-ai.txt     # Optional AI dependencies (ultralytics, torch)
 ```
 
-## Configuration
+</details>
 
-### Project Config (`config/project.json`)
-
-Created by the setup wizard on first run. Contains:
-
-```json
-{
-  "team_name": "FC Barcelona",
-  "season": "2024-25",
-  "language": "en",
-  "competitions": ["LaLiga", "UCL", "CopadelRey"],
-  "categories": [
-    {"id": 0, "key": "home_player", "label": "{home} Player", "color": "#E53935", "roster": "home"},
-    {"id": 1, "key": "opponent", "label": "Opponent", "color": "#1E88E5", "roster": "opponent_auto"}
-  ]
-}
-```
-
-The `{home}` placeholder in category labels is replaced with `team_name` at runtime.
-
-### Roster (CSV)
-
-Create a CSV with 4 columns for any team:
-
-```csv
-team,season,number,name
-Manchester City,2024-25,9,Erling Haaland
-Manchester City,2024-25,17,Kevin De Bruyne
-```
-
-**Home roster**: Set via `config/teams/home.json` or selected in the session dialog.
-
-**Opponent rosters**: Drop CSV files in `config/teams/opponents/` named as `Team_Name.csv` (underscores become spaces in the UI). The session dialog shows a dropdown of available opponents.
-
-### Metadata Options
-
-Edit `config/metadata_options.json` to customize metadata dimensions. Each dimension has:
-- `key`: Internal identifier
-- `label`: Display name in the UI
-- `options`: Available values
-- `default`: Default value for new frames
-- `auto_skip`: Values that trigger automatic frame skipping
-- `in_filename`: Whether this dimension appears in exported filenames
-
-### Multi-Language Support
-
-Set `"language"` in `config/project.json` to one of: `en`, `it`, `de`, `pt`, `fr`. Add new languages by creating a JSON file in `config/i18n/` with the same keys as `en.json`.
+---
 
 ## Documentation
 
