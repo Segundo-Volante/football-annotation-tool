@@ -136,6 +136,14 @@ class StatsBar(QWidget):
         self._shortcuts_btn.clicked.connect(self._toggle_shortcuts)
         layout.addWidget(self._shortcuts_btn)
 
+        # Video time label (hidden by default, shown for screenshotter bundles)
+        self._video_time_label = QLabel("")
+        self._video_time_label.setStyleSheet(
+            "color: #7EB8DA; font-size: 11px; font-weight: bold;"
+        )
+        self._video_time_label.setVisible(False)
+        layout.addWidget(self._video_time_label)
+
         layout.addStretch()
 
         self._zoom_label = QLabel("100%")
@@ -177,6 +185,14 @@ class StatsBar(QWidget):
                 QPushButton:hover { background: #404068; color: #C0C0D0; }
             """)
         self.shortcuts_toggled.emit(self._shortcuts_visible)
+
+    def set_video_time(self, time_str: str):
+        """Update the video time display. Pass empty string to hide."""
+        if time_str:
+            self._video_time_label.setText(f"Match time: {time_str}")
+            self._video_time_label.setVisible(True)
+        else:
+            self._video_time_label.setVisible(False)
 
     def set_box_visibility_label(self, text: str):
         """Update the box visibility mode indicator."""

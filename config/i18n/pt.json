@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Desfocagem",
   "meta.opt.overlay_heavy": "Overlay pesado",
 
+  "session.venue_label": "Local do jogo",
+  "session.venue_home": "Casa",
+  "session.venue_away": "Fora",
+  "session.venue_neutral": "Neutro",
+  "session.venue_auto_detected": "Detectado automaticamente a partir dos dados do jogo",
+
   "session.annotation_mode_label": "Modo de Anotação",
   "session.mode_manual": "Manual",
   "session.mode_ai_assisted": "Assistido por IA",

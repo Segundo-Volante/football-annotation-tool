@@ -1,8 +1,12 @@
+import json
+import logging
 from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
 
@@ -114,3 +118,128 @@ class FileManager:
         fname = FileManager.reference_crop_filename(side, jersey_number)
         path = crops_dir / fname
         return path if path.exists() else None
+
+    # ── Screenshotter Bundle Support ──
+
+    @staticmethod
+    def is_screenshotter_bundle(folder_path: str | Path) -> bool:
+        """Check if folder is a screenshotter annotation bundle.
+
+        Checks the folder itself and also the parent folder (in case the
+        user selected the frames/ subfolder directly).
+        """
+        folder = Path(folder_path)
+        has_match = (folder / "match.json").exists()
+        has_metadata = (folder / "frame_metadata.json").exists()
+        if has_match and has_metadata:
+            return True
+        # Also check parent (user may have selected frames/ subfolder)
+        parent = folder.parent
+        has_match_parent = (parent / "match.json").exists()
+        has_metadata_parent = (parent / "frame_metadata.json").exists()
+        return has_match_parent and has_metadata_parent
+
+    @staticmethod
+    def get_bundle_root(folder_path: str | Path) -> Path:
+        """Return the bundle root directory (containing match.json).
+
+        If folder_path itself contains match.json, returns it.
+        If the parent contains match.json (user selected frames/ subfolder),
+        returns the parent.
+        """
+        folder = Path(folder_path)
+        if (folder / "match.json").exists():
+            return folder
+        parent = folder.parent
+        if (parent / "match.json").exists():
+            return parent
+        return folder
+
+    @staticmethod
+    def load_match_json(folder_path: str | Path) -> Optional[dict]:
+        """Load match.json from a screenshotter bundle. Returns None on failure."""
+        match_path = Path(folder_path) / "match.json"
+        if not match_path.exists():
+            return None
+        try:
+            return json.loads(match_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read match.json: %s", e)
+            return None
+
+    @staticmethod
+    def load_frame_metadata(bundle_path: str | Path) -> dict[str, dict]:
+        """Load frame_metadata.json and return dict keyed by filename for O(1) lookup.
+
+        Returns empty dict on failure.
+        """
+        metadata_path = Path(bundle_path) / "frame_metadata.json"
+        if not metadata_path.exists():
+            return {}
+        try:
+            data = json.loads(metadata_path.read_text(encoding="utf-8"))
+            return {f["file_name"]: f for f in data.get("frames", [])}
+        except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
+            logger.warning("Failed to read frame_metadata.json: %s", e)
+            return {}
+
+    @staticmethod
+    def sort_frames_by_priority(
+        filenames: list[str],
+        frame_metadata: dict[str, dict],
+    ) -> list[dict]:
+        """Sort frames by annotation priority using camera_angle from metadata.
+
+        Priority order (highest first):
+        1. WIDE_CENTER frames (sorted by video_time ascending)
+        2. WIDE_LEFT and WIDE_RIGHT frames (sorted by video_time)
+        3. MEDIUM frames (sorted by video_time)
+        4. Everything else / unknown (sorted by video_time)
+
+        Returns list of dicts: [{filename, priority_group, video_time, camera_angle, ...}]
+        """
+        PRIORITY = {
+            "WIDE_CENTER": 0,
+            "WIDE_LEFT": 1,
+            "WIDE_RIGHT": 1,
+            "MEDIUM": 2,
+        }
+
+        enriched = []
+        for fname in filenames:
+            meta = frame_metadata.get(fname, {})
+            camera_angle = meta.get("camera_angle", "UNKNOWN")
+            video_time = meta.get("video_time", 99999.0)
+            priority = PRIORITY.get(camera_angle, 3)
+            enriched.append({
+                "filename": fname,
+                "original_filename": fname,
+                "camera_angle": camera_angle,
+                "video_time": video_time,
+                "priority_group": priority,
+            })
+
+        enriched.sort(key=lambda x: (x["priority_group"], x["video_time"]))
+        return enriched
+
+    @staticmethod
+    def format_video_time(seconds: float) -> str:
+        """Convert seconds (e.g. 601.42) to mm:ss format (e.g. '10:01')."""
+        try:
+            total_secs = int(seconds)
+            mins = total_secs // 60
+            secs = total_secs % 60
+            return f"{mins}:{secs:02d}"
+        except (TypeError, ValueError):
+            return "?:??"
+
+    @staticmethod
+    def get_priority_group_label(group: int) -> str:
+        """Return a human-readable label for a priority group number."""
+        labels = {
+            0: "Wide Center",
+            1: "Wide Left/Right",
+            2: "Medium",
+            3: "Other",
+        }
+        return labels.get(group, "Other")

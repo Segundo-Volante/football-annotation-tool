@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Flou de mouvement",
   "meta.opt.overlay_heavy": "Overlay lourd",
 
+  "session.venue_label": "Lieu du match",
+  "session.venue_home": "Domicile",
+  "session.venue_away": "Extérieur",
+  "session.venue_neutral": "Neutre",
+  "session.venue_auto_detected": "Détecté automatiquement à partir des données du match",
+
   "session.annotation_mode_label": "Mode d'Annotation",
   "session.mode_manual": "Manuel",
   "session.mode_ai_assisted": "Assisté par IA",

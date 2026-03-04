@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Mosso",
   "meta.opt.overlay_heavy": "Overlay pesante",
 
+  "session.venue_label": "Sede della partita",
+  "session.venue_home": "Casa",
+  "session.venue_away": "Trasferta",
+  "session.venue_neutral": "Neutro",
+  "session.venue_auto_detected": "Rilevato automaticamente dai dati della partita",
+
   "session.annotation_mode_label": "Modalità Annotazione",
   "session.mode_manual": "Manuale",
   "session.mode_ai_assisted": "Assistita da IA",

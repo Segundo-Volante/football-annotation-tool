@@ -33,6 +33,7 @@ class MetadataBar(QWidget):
         # State
         self._active_dim = 0
         self._values: dict[str, str] = {}
+        self._auto_filled: set[str] = set()  # keys that were auto-filled from bundle
         for dim in self._dimensions:
             self._values[dim["key"]] = dim["default"]
 
@@ -95,6 +96,8 @@ class MetadataBar(QWidget):
         if 0 <= idx < len(options):
             value = options[idx]
             self._values[dim["key"]] = value
+            # Clear auto-fill indicator on manual change
+            self._auto_filled.discard(dim["key"])
             self._update_pills()
             self._update_options()
             self.metadata_changed.emit(dim["key"], value)
@@ -104,9 +107,23 @@ class MetadataBar(QWidget):
 
     def set_metadata(self, **kwargs):
         """Set all dimension values at once (when loading a frame)."""
+        self._auto_filled.clear()
         for key, value in kwargs.items():
             if value is not None and key in self._values:
                 self._values[key] = value
+        self._update_pills()
+        self._update_options()
+
+    def set_prefilled_metadata(self, prefill: dict[str, str]):
+        """Set metadata values from bundle pre-fill and mark them as auto-filled.
+
+        Call this AFTER set_metadata() to overlay pre-filled values.
+        Keys not in prefill are left unchanged.
+        """
+        for key, value in prefill.items():
+            if value is not None and key in self._values:
+                self._values[key] = value
+                self._auto_filled.add(key)
         self._update_pills()
         self._update_options()
 
@@ -127,24 +144,40 @@ class MetadataBar(QWidget):
             val = self._values.get(key, dim["default"])
             display_label = t(f"meta.label.{key}")
             display_val = t(f"meta.opt.{val}")
-            pill.setText(f"{display_label}: {display_val}")
+            is_auto = key in self._auto_filled
+            auto_tag = " [auto]" if is_auto else ""
+            pill.setText(f"{display_label}: {display_val}{auto_tag}")
             if i == self._active_dim:
+                # Active dim with auto-fill gets slightly different tint
+                bg = "#3A3A50"
+                border_color = "#C89020" if is_auto else "#F5A623"
+                text_color = "#C89020" if is_auto else "#F5A623"
                 pill.setStyleSheet(
-                    "QPushButton {"
-                    "  background: #3A3A50; color: #F5A623; font-size: 11px;"
-                    "  font-weight: bold; border: 2px solid #F5A623;"
-                    "  border-radius: 4px; padding: 2px 8px;"
-                    "}"
+                    f"QPushButton {{"
+                    f"  background: {bg}; color: {text_color}; font-size: 11px;"
+                    f"  font-weight: bold; border: 2px solid {border_color};"
+                    f"  border-radius: 4px; padding: 2px 8px;"
+                    f"}}"
                 )
             else:
-                pill.setStyleSheet(
-                    "QPushButton {"
-                    "  background: #333348; color: #AAAACC; font-size: 11px;"
-                    "  border: 1px solid #555570; border-radius: 4px;"
-                    "  padding: 2px 8px;"
-                    "}"
-                    "QPushButton:hover { background: #3A3A50; }"
-                )
+                if is_auto:
+                    pill.setStyleSheet(
+                        "QPushButton {"
+                        "  background: #35354A; color: #C89020; font-size: 11px;"
+                        "  border: 1px solid #7A6520; border-radius: 4px;"
+                        "  padding: 2px 8px;"
+                        "}"
+                        "QPushButton:hover { background: #3A3A50; }"
+                    )
+                else:
+                    pill.setStyleSheet(
+                        "QPushButton {"
+                        "  background: #333348; color: #AAAACC; font-size: 11px;"
+                        "  border: 1px solid #555570; border-radius: 4px;"
+                        "  padding: 2px 8px;"
+                        "}"
+                        "QPushButton:hover { background: #3A3A50; }"
+                    )
 
     def _update_options(self):
         # Clear existing

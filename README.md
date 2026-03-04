@@ -4,7 +4,7 @@ A keyboard-driven PyQt6 desktop application for annotating football broadcast fr
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
-![Tests](https://img.shields.io/badge/Tests-218_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-280_passing-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ![Main Annotation View](screenshots/main_annotation_view.png)
@@ -48,6 +48,7 @@ A keyboard-driven PyQt6 desktop application for annotating football broadcast fr
 - Keyboard-first workflow -- every action mapped to a key (5-10s per frame)
 - Player roster auto-fill from CSV (type jersey number, name fills automatically)
 - Squad Sheet panel with click-to-assign: select a box, click a player row to assign instantly
+- Formation View: tactical formation overlay arranges home team players by position (4-4-2, 4-3-3, etc.)
 - SquadList folder support: place player headshot images for quick visual identification
 - Hover-to-enlarge player photos in the Squad Sheet for easy recognition
 - Collapsible keyboard shortcuts bar in the stats area (toggle with "? Shortcuts" button)
@@ -557,6 +558,7 @@ football-annotation-tool/
 │   ├── squad_loader.py     # Squad JSON/SquadList loader + generator
 │   ├── model_manager.py    # AI model manager (YOLO/RT-DETR, optional)
 │   ├── roster_manager.py   # CSV roster loader + player lookup
+│   ├── formation_utils.py  # Formation parsing + player-to-position mapping
 │   ├── project_config.py   # Project configuration loader (project.json)
 │   ├── session_stats.py    # Real-time session speed/ETA tracking
 │   ├── collaboration.py    # Collaboration workflow manager
@@ -566,7 +568,7 @@ football-annotation-tool/
 │   ├── canvas.py           # Image display + box drawing
 │   ├── metadata_bar.py     # Tab+Number metadata system
 │   ├── annotation_panel.py # Box list panel
-│   ├── squad_panel.py      # Squad Sheet with click-to-assign + hover enlarge
+│   ├── squad_panel.py      # Squad Sheet with List View + Formation View tabs
 │   ├── filmstrip.py        # Thumbnail sidebar
 │   ├── session_dialog.py   # Session configuration dialog
 │   ├── setup_wizard.py     # First-run setup wizard

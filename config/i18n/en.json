@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Motion Blur",
   "meta.opt.overlay_heavy": "Heavy Overlay",
 
+  "session.venue_label": "Match Venue",
+  "session.venue_home": "Home",
+  "session.venue_away": "Away",
+  "session.venue_neutral": "Neutral",
+  "session.venue_auto_detected": "Auto-detected from match data",
+
   "session.annotation_mode_label": "Annotation Mode",
   "session.mode_manual": "Manual",
   "session.mode_ai_assisted": "AI-Assisted",

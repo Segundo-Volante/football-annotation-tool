@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     annotation_mode TEXT DEFAULT 'manual',
     model_name TEXT,
     model_confidence REAL DEFAULT 0.30,
+    venue TEXT DEFAULT 'home',
     workflow TEXT DEFAULT 'solo',
     annotator TEXT,
     assigned_frames TEXT,
@@ -82,6 +83,7 @@ class StateDB:
             ("annotation_mode", "'manual'"),
             ("model_name", "NULL"),
             ("model_confidence", "0.30"),
+            ("venue", "'home'"),
         ]:
             if col not in existing:
                 self.conn.execute(
@@ -101,16 +103,17 @@ class StateDB:
                        annotation_mode: str = "manual",
                        model_name: str = "",
                        model_confidence: float = 0.30,
+                       venue: str = "home",
                        workflow: str = "solo",
                        annotator: str = "") -> int:
         cur = self.conn.execute(
             "INSERT INTO sessions (folder_path, source, match_round, opponent, "
             "weather, lighting, opponent_roster_path, annotation_mode, "
-            "model_name, model_confidence, workflow, annotator, last_opened) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            "model_name, model_confidence, venue, workflow, annotator, last_opened) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
             (folder_path, source, match_round, opponent, weather, lighting,
              opponent_roster_path or None, annotation_mode,
-             model_name or None, model_confidence, workflow, annotator or None),
+             model_name or None, model_confidence, venue, workflow, annotator or None),
         )
         self.conn.commit()
         return cur.lastrowid

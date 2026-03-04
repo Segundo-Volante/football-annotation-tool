@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
@@ -7,6 +8,8 @@ from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QButtonGroup, QRadioButton, QGroupBox, QGridLayout,
     QFrame, QSlider,
 )
+
+logger = logging.getLogger(__name__)
 
 try:
     from backend.model_manager import AI_AVAILABLE
@@ -27,12 +30,16 @@ LANGUAGE_OPTIONS = [
 
 
 class SessionDialog(QDialog):
-    """Startup dialog: language selector, folder, roster CSV, session defaults."""
+    """Startup dialog: language selector, folder, roster CSV, session defaults.
+
+    Horizontal two-column layout: left column for data/match config,
+    right column for annotation settings.
+    """
 
     def __init__(self, parent=None, project_config=None):
         super().__init__(parent)
         self.setWindowTitle(t("session.window_title"))
-        self.setFixedWidth(560)
+        self.setFixedWidth(920)
         self.setStyleSheet("""
             QDialog { background: #1E1E2E; }
             QLabel { color: #E8E8F0; font-size: 12px; }
@@ -66,60 +73,66 @@ class SessionDialog(QDialog):
         self._selected_lang = I18n.lang()
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(8)
+        layout.setContentsMargins(20, 16, 20, 16)
 
-        # Title
+        # ── Top header: Title (left) + Language buttons (right) ──
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
         self._title_label = QLabel(t("main.window_title"))
-        self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #F5A623;")
-        layout.addWidget(self._title_label)
+        self._title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #F5A623;")
+        header_row.addWidget(self._title_label)
+        header_row.addStretch()
 
-        # ── Language selector row ──
-        lang_row = QHBoxLayout()
-        lang_row.setSpacing(6)
-
-        # Build the label from all languages' word for "Language"
-        lang_header_parts = []
-        for code, native_word, _name in LANGUAGE_OPTIONS:
-            # Extract just the flag + word (e.g. "🇬🇧 Language")
-            lang_header_parts.append(native_word)
-        lang_header = QLabel("  /  ".join(lang_header_parts))
-        lang_header.setStyleSheet(
-            "color: #8888A0; font-size: 10px; font-weight: bold;"
-        )
-        lang_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lang_header)
-
-        # Language buttons row
-        lang_btn_row = QHBoxLayout()
-        lang_btn_row.setSpacing(4)
-        lang_btn_row.addStretch()
         self._lang_buttons: list[QPushButton] = []
         for code, native_word, display_name in LANGUAGE_OPTIONS:
-            # Extract just the flag emoji (first 4 chars)
             flag = native_word.split("  ")[0]
             btn = QPushButton(f"{flag} {display_name}")
             btn.setProperty("lang_code", code)
-            btn.setFixedHeight(30)
+            btn.setFixedHeight(26)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(lambda _checked, c=code: self._on_language_changed(c))
             self._lang_buttons.append(btn)
-            lang_btn_row.addWidget(btn)
-        lang_btn_row.addStretch()
-        layout.addLayout(lang_btn_row)
+            header_row.addWidget(btn)
+        layout.addLayout(header_row)
         self._update_lang_buttons()
 
-        # Separator after language
-        lang_sep = QFrame()
-        lang_sep.setFrameShape(QFrame.Shape.HLine)
-        lang_sep.setStyleSheet("color: #404060;")
-        layout.addWidget(lang_sep)
+        # Separator after header
+        header_sep = QFrame()
+        header_sep.setFrameShape(QFrame.Shape.HLine)
+        header_sep.setStyleSheet("color: #404060;")
+        layout.addWidget(header_sep)
 
-        # Folder row
+        # ══════════════════════════════════════════════════════════
+        #  Two-column content layout
+        # ══════════════════════════════════════════════════════════
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+
+        # ═══ LEFT COLUMN: Data & Match ═══════════════════════════
+        left_col = QVBoxLayout()
+        left_col.setSpacing(6)
+
+        # ── Bundle detection banner (hidden by default) ──
+        self._bundle_banner = QLabel("")
+        self._bundle_banner.setWordWrap(True)
+        self._bundle_banner.setStyleSheet(
+            "background: #1A3A5C; color: #B8D8F8; font-size: 11px;"
+            " border: 1px solid #2A5A8C; border-radius: 6px;"
+            " padding: 8px 12px;"
+        )
+        self._bundle_banner.setVisible(False)
+        left_col.addWidget(self._bundle_banner)
+
+        # Bundle state
+        self._is_bundle = False
+        self._bundle_match_data: dict = {}
+        self._bundle_frame_count = 0
+
+        # ── Folder row ──
         self._folder_label = QLabel(t("session.folder_label"))
         self._folder_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._folder_label)
+        left_col.addWidget(self._folder_label)
         folder_row = QHBoxLayout()
         self._folder_input = QLineEdit()
         self._folder_input.setPlaceholderText(t("session.folder_placeholder"))
@@ -128,12 +141,12 @@ class SessionDialog(QDialog):
         self._browse_folder_btn = QPushButton(t("button.browse"))
         self._browse_folder_btn.clicked.connect(self._browse_folder)
         folder_row.addWidget(self._browse_folder_btn)
-        layout.addLayout(folder_row)
+        left_col.addLayout(folder_row)
 
-        # Roster CSV row
+        # ── Roster CSV row ──
         self._roster_label = QLabel(t("session.roster_label"))
         self._roster_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._roster_label)
+        left_col.addWidget(self._roster_label)
         roster_row = QHBoxLayout()
         self._roster_input = QLineEdit()
         self._roster_input.setPlaceholderText(t("session.roster_placeholder"))
@@ -142,17 +155,17 @@ class SessionDialog(QDialog):
         self._browse_roster_btn = QPushButton(t("button.browse"))
         self._browse_roster_btn.clicked.connect(self._browse_roster)
         roster_row.addWidget(self._browse_roster_btn)
-        layout.addLayout(roster_row)
+        left_col.addLayout(roster_row)
 
-        # Roster info label (shows team + season after selecting CSV)
+        # Roster info label
         self._roster_info = QLabel("")
         self._roster_info.setStyleSheet("color: #F5A623; font-size: 11px;")
-        layout.addWidget(self._roster_info)
+        left_col.addWidget(self._roster_info)
 
-        # Squad JSON row
+        # ── Squad JSON row ──
         self._squad_label = QLabel("Squad File (squad.json)")
         self._squad_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._squad_label)
+        left_col.addWidget(self._squad_label)
         squad_row = QHBoxLayout()
         self._squad_input = QLineEdit()
         self._squad_input.setPlaceholderText("Auto-detected or browse...")
@@ -176,20 +189,49 @@ class SessionDialog(QDialog):
         """)
         self._generate_squad_btn.clicked.connect(self._generate_squad_from_folder)
         squad_row.addWidget(self._generate_squad_btn)
-        layout.addLayout(squad_row)
+        left_col.addLayout(squad_row)
 
         self._squad_info = QLabel("")
         self._squad_info.setStyleSheet("color: #F5A623; font-size: 11px;")
-        layout.addWidget(self._squad_info)
+        left_col.addWidget(self._squad_info)
         self._squad_path = ""
 
-        # Separator
+        # ── Separator before match info ──
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.Shape.HLine)
         sep1.setStyleSheet("color: #404060;")
-        layout.addWidget(sep1)
+        left_col.addWidget(sep1)
 
-        # Source / Round / Opponent row
+        # ══ Team Mode Toggle ══
+        team_mode_row = QHBoxLayout()
+        team_mode_row.setSpacing(10)
+        self._team_mode_label = QLabel("Team Mode:")
+        self._team_mode_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
+        team_mode_row.addWidget(self._team_mode_label)
+
+        self._team_mode_group = QButtonGroup(self)
+        self._one_team_radio = QRadioButton("One Team")
+        self._one_team_radio.setChecked(True)
+        self._one_team_radio.setToolTip(
+            "Club analyst mode — annotate from your team's perspective.\n"
+            "You pick an opponent and venue (Home / Away / Neutral)."
+        )
+        self._all_team_radio = QRadioButton("All Team")
+        self._all_team_radio.setToolTip(
+            "Match analyst mode — annotate both teams equally.\n"
+            "You specify Team 1 and Team 2 with their venue."
+        )
+        self._team_mode_group.addButton(self._one_team_radio, 0)
+        self._team_mode_group.addButton(self._all_team_radio, 1)
+        team_mode_row.addWidget(self._one_team_radio)
+        team_mode_row.addWidget(self._all_team_radio)
+        team_mode_row.addStretch()
+        left_col.addLayout(team_mode_row)
+
+        # Connect mode toggle BEFORE building the match-info widgets
+        self._team_mode_group.idToggled.connect(self._on_team_mode_toggled)
+
+        # ── Source / Round (shared by both modes) ──
         grid = QGridLayout()
         grid.setSpacing(8)
         self._source_label = QLabel(t("session.source_label"))
@@ -197,7 +239,6 @@ class SessionDialog(QDialog):
         self._source_combo = QComboBox()
         self._source_combo.setEditable(True)
         self._source_combo.lineEdit().setPlaceholderText(t("session.source_placeholder"))
-        # Load competitions from project config, fallback to defaults
         if self._project_config and self._project_config.exists:
             competitions = self._project_config.get_competitions()
         else:
@@ -220,29 +261,115 @@ class SessionDialog(QDialog):
         self._round_input.setPlaceholderText(t("session.round_placeholder"))
         grid.addWidget(self._round_input, 0, 3)
 
+        # ── One Team Mode: Opponent row ──
         self._opponent_label = QLabel(t("session.opponent_label"))
         grid.addWidget(self._opponent_label, 1, 0)
         self._opponent_combo = QComboBox()
         self._opponent_combo.setEditable(True)
         self._opponent_combo.lineEdit().setPlaceholderText(t("session.opponent_placeholder"))
-        # Populate with known opponents from CSV files
         if self._project_config and self._project_config.exists:
             opponent_names = self._project_config.get_opponent_names()
             if opponent_names:
                 self._opponent_combo.addItems(opponent_names)
         grid.addWidget(self._opponent_combo, 1, 1, 1, 3)
-        layout.addLayout(grid)
 
-        # Separator
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #404060;")
-        layout.addWidget(sep2)
+        # ── All Team Mode: Team 1 / Team 2 rows (hidden by default) ──
+        self._team1_label = QLabel("Team 1:")
+        self._team1_label.setVisible(False)
+        grid.addWidget(self._team1_label, 2, 0)
+        self._team1_combo = QComboBox()
+        self._team1_combo.setEditable(True)
+        self._team1_combo.lineEdit().setPlaceholderText("Home team name...")
+        self._team1_combo.setVisible(False)
+        # Populate with known team names from project config
+        if self._project_config and self._project_config.exists:
+            all_teams = []
+            if self._project_config.team_name:
+                all_teams.append(self._project_config.team_name)
+            opp_names = self._project_config.get_opponent_names()
+            if opp_names:
+                all_teams.extend(opp_names)
+            if all_teams:
+                self._team1_combo.addItems(all_teams)
+        grid.addWidget(self._team1_combo, 2, 1, 1, 3)
+
+        self._team2_label = QLabel("Team 2:")
+        self._team2_label.setVisible(False)
+        grid.addWidget(self._team2_label, 3, 0)
+        self._team2_combo = QComboBox()
+        self._team2_combo.setEditable(True)
+        self._team2_combo.lineEdit().setPlaceholderText("Away team name...")
+        self._team2_combo.setVisible(False)
+        if self._project_config and self._project_config.exists:
+            all_teams2 = []
+            if self._project_config.team_name:
+                all_teams2.append(self._project_config.team_name)
+            opp_names2 = self._project_config.get_opponent_names()
+            if opp_names2:
+                all_teams2.extend(opp_names2)
+            if all_teams2:
+                self._team2_combo.addItems(all_teams2)
+        grid.addWidget(self._team2_combo, 3, 1, 1, 3)
+
+        # Update venue labels when team names change (All Team Mode)
+        self._team1_combo.currentTextChanged.connect(self._update_venue_labels)
+        self._team2_combo.currentTextChanged.connect(self._update_venue_labels)
+
+        left_col.addLayout(grid)
+
+        # Keep refs to One-Team-Mode widgets for toggling
+        self._one_team_widgets = [self._opponent_label, self._opponent_combo]
+        self._all_team_widgets = [
+            self._team1_label, self._team1_combo,
+            self._team2_label, self._team2_combo,
+        ]
+
+        # ── Match Venue ──
+        self._venue_label = QLabel(t("session.venue_label"))
+        self._venue_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
+        left_col.addWidget(self._venue_label)
+
+        venue_row = QHBoxLayout()
+        self._venue_group = QButtonGroup(self)
+        self._venue_home = QRadioButton(t("session.venue_home"))
+        self._venue_home.setProperty("value", "home")
+        self._venue_home.setChecked(True)
+        self._venue_away = QRadioButton(t("session.venue_away"))
+        self._venue_away.setProperty("value", "away")
+        self._venue_neutral = QRadioButton(t("session.venue_neutral"))
+        self._venue_neutral.setProperty("value", "neutral")
+        self._venue_group.addButton(self._venue_home, 0)
+        self._venue_group.addButton(self._venue_away, 1)
+        self._venue_group.addButton(self._venue_neutral, 2)
+        venue_row.addWidget(self._venue_home)
+        venue_row.addWidget(self._venue_away)
+        venue_row.addWidget(self._venue_neutral)
+        venue_row.addStretch()
+        left_col.addLayout(venue_row)
+
+        # Auto-fill hint (shown when venue detected from match.json)
+        self._venue_auto_hint = QLabel("")
+        self._venue_auto_hint.setStyleSheet("color: #8888A0; font-size: 10px; font-style: italic;")
+        self._venue_auto_hint.setVisible(False)
+        left_col.addWidget(self._venue_auto_hint)
+
+        left_col.addStretch()
+        columns.addLayout(left_col, stretch=1)
+
+        # ── Vertical separator ──
+        vsep = QFrame()
+        vsep.setFrameShape(QFrame.Shape.VLine)
+        vsep.setStyleSheet("color: #404060;")
+        columns.addWidget(vsep)
+
+        # ═══ RIGHT COLUMN: Annotation Settings ═══════════════════
+        right_col = QVBoxLayout()
+        right_col.setSpacing(6)
 
         # ── Annotation Mode ──
         self._mode_label = QLabel(t("session.annotation_mode_label"))
         self._mode_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._mode_label)
+        right_col.addWidget(self._mode_label)
 
         mode_row = QHBoxLayout()
         self._mode_group = QButtonGroup(self)
@@ -256,7 +383,7 @@ class SessionDialog(QDialog):
         self._mode_group.addButton(self._ai_radio, 1)
         mode_row.addWidget(self._manual_radio)
         mode_row.addWidget(self._ai_radio)
-        layout.addLayout(mode_row)
+        right_col.addLayout(mode_row)
 
         # Model selection
         model_row = QHBoxLayout()
@@ -264,7 +391,6 @@ class SessionDialog(QDialog):
         model_row.addWidget(self._model_label)
         self._model_combo = QComboBox()
         self._model_items = [
-            # (display_name, model_key, group)
             ("Football — RF-DETR-n  (fast)", "football-rfdetr-n", "football"),
             ("Football — RF-DETR-s  (balanced)", "football-rfdetr-s", "football"),
             ("Football — RF-DETR-m  (accurate)", "football-rfdetr-m", "football"),
@@ -283,14 +409,14 @@ class SessionDialog(QDialog):
         self._model_combo.setEnabled(False)
         self._model_combo.currentIndexChanged.connect(self._on_model_changed)
         model_row.addWidget(self._model_combo, stretch=1)
-        layout.addLayout(model_row)
+        right_col.addLayout(model_row)
 
         # Model description line
         self._model_desc = QLabel(t("session.model_desc_football"))
         self._model_desc.setStyleSheet("color: #6A6A8A; font-size: 10px; padding-left: 4px;")
         self._model_desc.setWordWrap(True)
         self._model_desc.setVisible(False)
-        layout.addWidget(self._model_desc)
+        right_col.addWidget(self._model_desc)
 
         # Custom model file picker (hidden by default)
         custom_row = QHBoxLayout()
@@ -303,7 +429,7 @@ class SessionDialog(QDialog):
         self._browse_model_btn.setVisible(False)
         self._browse_model_btn.clicked.connect(self._browse_custom_model)
         custom_row.addWidget(self._browse_model_btn)
-        layout.addLayout(custom_row)
+        right_col.addLayout(custom_row)
 
         # Confidence slider
         conf_row = QHBoxLayout()
@@ -322,20 +448,20 @@ class SessionDialog(QDialog):
         conf_row.addWidget(self._conf_slider)
         conf_row.addWidget(self._conf_value_label)
         conf_row.addStretch()
-        layout.addLayout(conf_row)
+        right_col.addLayout(conf_row)
 
         # Connect mode toggle
         self._mode_group.idToggled.connect(self._on_mode_toggled)
 
-        # Separator before session defaults
+        # ── Separator before session defaults ──
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.Shape.HLine)
         sep3.setStyleSheet("color: #404060;")
-        layout.addWidget(sep3)
+        right_col.addWidget(sep3)
 
         self._defaults_label = QLabel(t("session.defaults_label"))
         self._defaults_label.setStyleSheet("color: #8888A0; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._defaults_label)
+        right_col.addWidget(self._defaults_label)
 
         # Build session-level radio groups dynamically from config array
         self._session_groups: dict[str, QButtonGroup] = {}
@@ -357,7 +483,7 @@ class SessionDialog(QDialog):
                     rb.setChecked(True)
             self._session_groups[key] = group
             self._session_boxes.append(box)
-            layout.addWidget(box)
+            right_col.addWidget(box)
 
         # Set better defaults for known keys
         if "lighting" in self._session_groups:
@@ -366,8 +492,9 @@ class SessionDialog(QDialog):
                     btn.setChecked(True)
                     break
 
-        # Start button
-        layout.addSpacing(8)
+        right_col.addStretch()
+
+        # ── Start button ──
         self._start_btn = QPushButton(t("button.start_annotating"))
         self._start_btn.setStyleSheet("""
             QPushButton {
@@ -378,7 +505,10 @@ class SessionDialog(QDialog):
             QPushButton:disabled { background: #404060; color: #666; }
         """)
         self._start_btn.clicked.connect(self._on_start)
-        layout.addWidget(self._start_btn)
+        right_col.addWidget(self._start_btn)
+
+        columns.addLayout(right_col, stretch=1)
+        layout.addLayout(columns, stretch=1)
 
         # Pre-fill roster from project config or fallback to default
         default_roster = None
@@ -392,6 +522,38 @@ class SessionDialog(QDialog):
             self._roster_path = str(default_roster)
             self._roster_input.setText(str(default_roster))
             self._preview_roster(default_roster)
+
+    # ── Team Mode switching ──
+
+    def _on_team_mode_toggled(self, id: int, checked: bool):
+        """Switch between One Team Mode and All Team Mode."""
+        is_all_team = self._all_team_radio.isChecked()
+
+        # Toggle One Team widgets
+        for w in self._one_team_widgets:
+            w.setVisible(not is_all_team)
+
+        # Toggle All Team widgets
+        for w in self._all_team_widgets:
+            w.setVisible(is_all_team)
+
+        # Update venue labels
+        if is_all_team:
+            self._update_venue_labels()
+        else:
+            self._venue_home.setText(t("session.venue_home"))
+            self._venue_away.setText(t("session.venue_away"))
+            self._venue_neutral.setText(t("session.venue_neutral"))
+
+    def _update_venue_labels(self):
+        """Update venue radio labels with team names (All Team Mode)."""
+        if not self._all_team_radio.isChecked():
+            return
+        t1 = self._team1_combo.currentText().strip() or "Team 1"
+        t2 = self._team2_combo.currentText().strip() or "Team 2"
+        self._venue_home.setText(f"{t1} Home")
+        self._venue_away.setText(f"{t2} Home")
+        self._venue_neutral.setText(t("session.venue_neutral"))
 
     # ── Language switching ──
 
@@ -437,6 +599,15 @@ class SessionDialog(QDialog):
         self._round_input.setPlaceholderText(t("session.round_placeholder"))
         self._opponent_label.setText(t("session.opponent_label"))
         self._opponent_combo.lineEdit().setPlaceholderText(t("session.opponent_placeholder"))
+        self._venue_label.setText(t("session.venue_label"))
+        if self._all_team_radio.isChecked():
+            self._update_venue_labels()
+        else:
+            self._venue_home.setText(t("session.venue_home"))
+            self._venue_away.setText(t("session.venue_away"))
+            self._venue_neutral.setText(t("session.venue_neutral"))
+        if self._venue_auto_hint.isVisible():
+            self._venue_auto_hint.setText(t("session.venue_auto_detected"))
         self._defaults_label.setText(t("session.defaults_label"))
         self._mode_label.setText(t("session.annotation_mode_label"))
         self._manual_radio.setText(t("session.mode_manual"))
@@ -508,6 +679,8 @@ class SessionDialog(QDialog):
             self._folder_input.setText(folder)
             # Auto-detect squad.json in selected folder
             self._auto_detect_squad(folder)
+            # Check for screenshotter bundle (match.json + frame_metadata.json)
+            self._detect_bundle(folder)
 
     def _browse_roster(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -588,6 +761,167 @@ class SessionDialog(QDialog):
             self._squad_info.setText("Failed to generate squad.json — no valid images found")
             self._squad_info.setStyleSheet("color: #E74C3C; font-size: 11px;")
 
+    def _detect_bundle(self, folder: str):
+        """Detect screenshotter bundle and auto-fill session fields."""
+        from backend.file_manager import FileManager
+
+        try:
+            self._detect_bundle_impl(folder)
+        except Exception as e:
+            logger.warning("Bundle detection failed: %s", e, exc_info=True)
+            self._is_bundle = False
+            self._bundle_banner.setVisible(False)
+            # Fall back to venue-only auto-fill
+            self._auto_fill_venue_from_match_json(folder)
+
+    def _detect_bundle_impl(self, folder: str):
+        """Internal bundle detection — may raise on unexpected data."""
+        from backend.file_manager import FileManager
+
+        if not FileManager.is_screenshotter_bundle(folder):
+            # Not a bundle — just try venue auto-fill from match.json alone
+            self._auto_fill_venue_from_match_json(folder)
+            self._is_bundle = False
+            self._bundle_banner.setVisible(False)
+            return
+
+        # ── Full bundle detected ──
+        self._is_bundle = True
+        bundle_root = FileManager.get_bundle_root(folder)
+        match_data = FileManager.load_match_json(bundle_root)
+        if not match_data:
+            # match.json exists but is invalid
+            self._is_bundle = False
+            self._bundle_banner.setVisible(False)
+            return
+
+        self._bundle_match_data = match_data
+        frame_meta = FileManager.load_frame_metadata(bundle_root)
+        self._bundle_frame_count = len(frame_meta)
+
+        # Auto-fill: Venue
+        ha = match_data.get("home_away", "").upper()
+        venue_mapping = {"H": self._venue_home, "A": self._venue_away, "N": self._venue_neutral}
+        venue_btn = venue_mapping.get(ha)
+        if venue_btn:
+            venue_btn.setChecked(True)
+            self._venue_auto_hint.setText(t("session.venue_auto_detected"))
+            self._venue_auto_hint.setVisible(True)
+
+        # Auto-fill: Opponent (One Team) and Team 1/Team 2 (All Team)
+        opponent = match_data.get("opponent", "")
+        if opponent:
+            self._opponent_combo.setCurrentText(opponent)
+
+        # Auto-fill All Team Mode fields from bundle data
+        home_team_name = match_data.get("home_team_name", "")
+        away_team_name = match_data.get("away_team_name", "")
+        if home_team_name:
+            self._team1_combo.setCurrentText(home_team_name)
+        if away_team_name:
+            self._team2_combo.setCurrentText(away_team_name)
+        # If no explicit team names, derive from opponent + home_away
+        if not home_team_name and opponent:
+            team_name = ""
+            if self._project_config and self._project_config.exists:
+                team_name = self._project_config.team_name or ""
+            if ha == "A":
+                # Our team is away, opponent is home
+                self._team1_combo.setCurrentText(opponent)
+                if team_name:
+                    self._team2_combo.setCurrentText(team_name)
+            else:
+                # Our team is home, opponent is away
+                if team_name:
+                    self._team1_combo.setCurrentText(team_name)
+                self._team2_combo.setCurrentText(opponent)
+
+        # Auto-fill: Competition
+        competition = match_data.get("competition", "")
+        if competition:
+            # Try to match an existing item first
+            idx = self._source_combo.findText(competition)
+            if idx >= 0:
+                self._source_combo.setCurrentIndex(idx)
+            else:
+                self._source_combo.setCurrentText(competition)
+
+        # Auto-fill: Matchday / Round
+        matchday = match_data.get("matchday", "")
+        if matchday:
+            self._round_input.setText(str(matchday))
+
+        # Auto-fill: Date (store for result but no separate field)
+
+        # Build banner text
+        venue_label = {"H": "Home", "A": "Away", "N": "Neutral"}.get(ha, "")
+        parts = []
+        if matchday:
+            parts.append(f"MD{matchday}")
+        if opponent:
+            parts.append(f"vs {opponent}")
+        if venue_label:
+            parts.append(f"({venue_label})")
+        match_summary = " ".join(parts) if parts else "Match info loaded"
+        frame_text = f"{self._bundle_frame_count} frames" if self._bundle_frame_count else "frames"
+
+        self._bundle_banner.setText(
+            f"\U0001F4C2 Screenshotter bundle detected\n"
+            f"Match info auto-loaded: {match_summary}\n"
+            f"{frame_text} ready for annotation"
+        )
+        self._bundle_banner.setVisible(True)
+
+        # Check squad.json for empty players and show note
+        self._check_bundle_squad(str(bundle_root))
+
+    def _check_bundle_squad(self, folder: str):
+        """Check squad.json in bundle for empty player lists."""
+        from backend.squad_loader import load_squad_json
+        squad_path = Path(folder) / "squad.json"
+        if not squad_path.exists():
+            return
+
+        squad = load_squad_json(squad_path)
+        if squad and squad.is_loaded:
+            # Already handled by _auto_detect_squad — all good
+            return
+
+        # squad.json exists but players arrays are empty (placeholder)
+        self._squad_info.setText(
+            "Squad file found but has no players. "
+            "Add players to squad.json or select a roster CSV."
+        )
+        self._squad_info.setStyleSheet("color: #E6A817; font-size: 11px;")
+
+    def _auto_fill_venue_from_match_json(self, folder: str):
+        """Auto-fill venue from match.json if present (non-bundle fallback)."""
+        match_path = Path(folder) / "match.json"
+        if not match_path.exists():
+            self._venue_auto_hint.setVisible(False)
+            return
+        try:
+            data = json.loads(match_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        ha = data.get("home_away", "").upper()
+        mapping = {"H": self._venue_home, "A": self._venue_away, "N": self._venue_neutral}
+        btn = mapping.get(ha)
+        if btn:
+            btn.setChecked(True)
+            self._venue_auto_hint.setText(t("session.venue_auto_detected"))
+            self._venue_auto_hint.setVisible(True)
+        else:
+            self._venue_auto_hint.setVisible(False)
+
+        # Also populate team names for All Team Mode
+        home_team_name = data.get("home_team_name", "")
+        away_team_name = data.get("away_team_name", "")
+        if home_team_name:
+            self._team1_combo.setCurrentText(home_team_name)
+        if away_team_name:
+            self._team2_combo.setCurrentText(away_team_name)
+
     def _auto_detect_squad(self, folder: str):
         """Auto-detect squad.json or SquadList folder in the session folder."""
         from backend.squad_loader import find_squad_json, find_squad_list_folder, _IMAGE_EXTS
@@ -661,15 +995,35 @@ class SessionDialog(QDialog):
     def _on_start(self):
         if not self._folder_path or not self._round_input.text().strip():
             return
+
+        is_all_team = self._all_team_radio.isChecked()
+        team_mode = "all_team" if is_all_team else "one_team"
+
         self._result = {
             "folder": self._folder_path,
             "roster": self._roster_path,
             "squad_json": self._squad_path,
             "source": self._source_combo.currentText(),
             "round": self._round_input.text().strip(),
-            "opponent": self._opponent_combo.currentText().strip(),
             "language": self._selected_lang,
+            "is_bundle": self._is_bundle,
+            "team_mode": team_mode,
         }
+
+        if is_all_team:
+            # All Team Mode: Team 1 (home) and Team 2 (away)
+            self._result["team1"] = self._team1_combo.currentText().strip()
+            self._result["team2"] = self._team2_combo.currentText().strip()
+            self._result["opponent"] = ""  # No single opponent in all-team mode
+        else:
+            # One Team Mode: single opponent
+            self._result["opponent"] = self._opponent_combo.currentText().strip()
+            self._result["team1"] = ""
+            self._result["team2"] = ""
+
+        # Venue
+        venue_btn = self._venue_group.checkedButton()
+        self._result["venue"] = venue_btn.property("value") if venue_btn else "home"
         # AI-Assisted mode settings
         if self._ai_radio.isChecked():
             model_idx = self._model_combo.currentIndex()

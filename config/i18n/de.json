@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Bewegungsunschärfe",
   "meta.opt.overlay_heavy": "Overlay-schwer",
 
+  "session.venue_label": "Spielort",
+  "session.venue_home": "Heim",
+  "session.venue_away": "Auswärts",
+  "session.venue_neutral": "Neutral",
+  "session.venue_auto_detected": "Automatisch aus Spieldaten erkannt",
+
   "session.annotation_mode_label": "Annotationsmodus",
   "session.mode_manual": "Manuell",
   "session.mode_ai_assisted": "KI-gestützt",

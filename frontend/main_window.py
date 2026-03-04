@@ -226,6 +226,13 @@ class MainWindow(QMainWindow):
         # Squad data (from squad.json or CSV roster conversion)
         self._squad_data: Optional[SquadData] = None
 
+        # Screenshotter bundle state
+        self._is_bundle: bool = False
+        self._bundle_frame_metadata: dict[str, dict] = {}  # filename → metadata dict
+
+        # Team mode: "one_team" (club analyst) or "all_team" (match analyst)
+        self._team_mode: str = "one_team"
+
         # Session metadata (carried from SessionDialog)
         self._session_meta: dict = {}
 
@@ -542,6 +549,9 @@ class MainWindow(QMainWindow):
             if result.get("language", lang_before) != lang_before:
                 self._retranslate_ui()
 
+            # Store team mode
+            self._team_mode = result.get("team_mode", "one_team")
+
             # Load home roster from session result or project config
             roster_path = result.get("roster", "")
             if not roster_path and self._project_config.exists:
@@ -578,24 +588,71 @@ class MainWindow(QMainWindow):
                     candidate = Path(squad_json_path).parent / "SquadList"
                     if candidate.is_dir():
                         sl_folder = candidate
+                # Fallback: check the annotation tool's own project root
+                if not sl_folder:
+                    tool_root = Path(__file__).parent.parent
+                    candidate = tool_root / "SquadList"
+                    if candidate.is_dir():
+                        sl_folder = candidate
                 if sl_folder:
                     from backend.squad_loader import _IMAGE_EXTS
-                    for f in sorted(Path(sl_folder).iterdir()):
-                        if not f.is_file() or f.suffix.lower() not in _IMAGE_EXTS:
-                            continue
-                        parts = f.stem.split("_", 1)
-                        if len(parts) < 2:
-                            continue
-                        try:
-                            jersey = int(parts[0])
-                        except ValueError:
-                            continue
-                        # Assign to whichever team has this jersey number
-                        for side, team in [("home", self._squad_data.home_team),
-                                           ("away", self._squad_data.away_team)]:
+
+                    def _normalize_team(name: str) -> str:
+                        """Normalize team name for comparison."""
+                        import unicodedata
+                        nfkd = unicodedata.normalize("NFKD", name)
+                        return nfkd.encode("ASCII", "ignore").decode("ASCII").lower().strip()
+
+                    def _scan_images(folder: Path, side: str):
+                        """Scan a folder for player images and assign to a team side."""
+                        team = (self._squad_data.home_team if side == "home"
+                                else self._squad_data.away_team)
+                        for f in sorted(folder.iterdir()):
+                            if not f.is_file() or f.suffix.lower() not in _IMAGE_EXTS:
+                                continue
+                            parts = f.stem.split("_", 1)
+                            if len(parts) < 2:
+                                continue
+                            try:
+                                jersey = int(parts[0])
+                            except ValueError:
+                                continue
                             if any(p.jersey_number == jersey for p in team.players):
                                 self._squad_data.headshot_images[(side, jersey)] = f
-                                break
+
+                    # Check for team-named subfolders (e.g. SquadList/Atlético de Madrid/)
+                    sl_path = Path(sl_folder)
+                    subdirs = [d for d in sl_path.iterdir() if d.is_dir()
+                               and not d.name.startswith(".")]
+                    if subdirs:
+                        # Match subfolder names to team names in squad data
+                        home_name = _normalize_team(
+                            self._squad_data.home_team.name or "")
+                        away_name = _normalize_team(
+                            self._squad_data.away_team.name or "")
+                        for subdir in subdirs:
+                            norm = _normalize_team(subdir.name)
+                            if home_name and norm == home_name:
+                                _scan_images(subdir, "home")
+                            elif away_name and norm == away_name:
+                                _scan_images(subdir, "away")
+                    else:
+                        # Flat structure (no subfolders): assign by jersey match
+                        for f in sorted(sl_path.iterdir()):
+                            if not f.is_file() or f.suffix.lower() not in _IMAGE_EXTS:
+                                continue
+                            parts = f.stem.split("_", 1)
+                            if len(parts) < 2:
+                                continue
+                            try:
+                                jersey = int(parts[0])
+                            except ValueError:
+                                continue
+                            for side, team in [("home", self._squad_data.home_team),
+                                               ("away", self._squad_data.away_team)]:
+                                if any(p.jersey_number == jersey for p in team.players):
+                                    self._squad_data.headshot_images[(side, jersey)] = f
+                                    break
                     if self._squad_data.headshot_images:
                         logger.info("Merged %d SquadList headshots from: %s",
                                     len(self._squad_data.headshot_images), sl_folder)
@@ -617,6 +674,11 @@ class MainWindow(QMainWindow):
                 model_name=result.get("model_name", ""),
                 model_confidence=result.get("model_confidence", 0.30),
                 custom_model_path=result.get("custom_model_path", ""),
+                venue=result.get("venue", "home"),
+                is_bundle=result.get("is_bundle", False),
+                team_mode=result.get("team_mode", "one_team"),
+                team1=result.get("team1", ""),
+                team2=result.get("team2", ""),
             )
 
     def _retranslate_ui(self):
@@ -633,10 +695,29 @@ class MainWindow(QMainWindow):
                        annotation_mode: str = "manual",
                        model_name: str = "",
                        model_confidence: float = 0.30,
-                       custom_model_path: str = ""):
+                       custom_model_path: str = "",
+                       venue: str = "home",
+                       is_bundle: bool = False,
+                       team_mode: str = "one_team",
+                       team1: str = "",
+                       team2: str = ""):
         self._folder_path = folder
         self._annotation_mode = annotation_mode
+        self._is_bundle = is_bundle
+        self._team_mode = team_mode
         self._team_colors: Optional[dict] = None
+
+        # Load bundle frame metadata if this is a screenshotter bundle
+        if self._is_bundle:
+            try:
+                bundle_root = FileManager.get_bundle_root(folder)
+                self._bundle_frame_metadata = FileManager.load_frame_metadata(bundle_root)
+            except Exception as e:
+                logger.warning("Failed to load bundle metadata: %s", e)
+                self._bundle_frame_metadata = {}
+                self._is_bundle = False
+        else:
+            self._bundle_frame_metadata = {}
 
         # Session-level metadata to embed in every frame JSON
         self._session_meta = {
@@ -645,6 +726,10 @@ class MainWindow(QMainWindow):
             "opponent": opponent,
             "weather": weather,
             "lighting": lighting,
+            "venue": venue,
+            "team_mode": team_mode,
+            "team1": team1,
+            "team2": team2,
         }
 
         # ── Check for migration from old SQLite format ──
@@ -670,6 +755,7 @@ class MainWindow(QMainWindow):
                 annotation_mode=annotation_mode,
                 model_name=model_name,
                 model_confidence=model_confidence,
+                venue=venue,
             )
 
         # ── Scan frames and ensure JSON files exist ──
@@ -683,17 +769,36 @@ class MainWindow(QMainWindow):
         for summary in self._store.get_all_frame_summaries():
             annotation_status[summary["filename"]] = summary["status"]
 
-        self._frames = []
-        for i, fname in enumerate(filenames):
-            status = annotation_status.get(fname, "unviewed")
-            self._frames.append({
-                "filename": fname,
-                "original_filename": fname,  # compat key for filmstrip
-                "status": status,
-                "sort_order": i,
-            })
-            # Ensure each frame has a JSON annotation file
-            self._store.ensure_frame(fname, session_meta=self._session_meta)
+        # Apply priority sorting for screenshotter bundles
+        if self._is_bundle and self._bundle_frame_metadata:
+            sorted_frames = FileManager.sort_frames_by_priority(
+                filenames, self._bundle_frame_metadata
+            )
+            self._frames = []
+            for i, sf in enumerate(sorted_frames):
+                fname = sf["filename"]
+                status = annotation_status.get(fname, "unviewed")
+                self._frames.append({
+                    "filename": fname,
+                    "original_filename": fname,
+                    "status": status,
+                    "sort_order": i,
+                    "priority_group": sf.get("priority_group"),
+                    "video_time": sf.get("video_time"),
+                    "camera_angle": sf.get("camera_angle"),
+                })
+                self._store.ensure_frame(fname, session_meta=self._session_meta)
+        else:
+            self._frames = []
+            for i, fname in enumerate(filenames):
+                status = annotation_status.get(fname, "unviewed")
+                self._frames.append({
+                    "filename": fname,
+                    "original_filename": fname,
+                    "status": status,
+                    "sort_order": i,
+                })
+                self._store.ensure_frame(fname, session_meta=self._session_meta)
 
         # Initialize AI model if in AI-assisted mode
         self._model_manager = None
@@ -710,14 +815,20 @@ class MainWindow(QMainWindow):
         self._exporter = Exporter(
             self._store, folder, output_path, team_name=team_name,
             has_opponent_roster=self._opponent_roster is not None,
+            session_meta=self._session_meta,
         )
 
         # Load squad data into the Squad Sheet panel
         if self._squad_data and self._squad_data.is_loaded:
-            self._annotation_panel.squad_panel.load_squad(self._squad_data, folder)
+            self._annotation_panel.squad_panel.load_squad(
+                self._squad_data, folder, team_mode=self._team_mode,
+            )
 
-        # Load filmstrip
-        self._filmstrip.load_frames(self._frames, folder)
+        # Load filmstrip (pass frame_metadata for tooltips and section dividers)
+        self._filmstrip.load_frames(
+            self._frames, folder,
+            frame_metadata=self._bundle_frame_metadata if self._is_bundle else None,
+        )
 
         self.setWindowTitle(t("main.window_title_with_team",
                               team_name=team_name, folder_name=os.path.basename(folder)))
@@ -1000,6 +1111,36 @@ class MainWindow(QMainWindow):
 
         # Set metadata bar from frame's dynamic metadata dict
         self._metadata_bar.set_metadata(**self._current_frame.metadata)
+
+        # Pre-fill metadata from screenshotter bundle if available.
+        # Only apply on first view (UNVIEWED) — not on re-visits (IN_PROGRESS)
+        # to avoid overwriting manual changes the annotator already made.
+        if self._is_bundle and self._bundle_frame_metadata:
+            if self._current_frame.status == FrameStatus.UNVIEWED:
+                bundle_meta = self._bundle_frame_metadata.get(filename, {})
+                prefill = {}
+                pre_filled = bundle_meta.get("pre_filled_metadata", {})
+                shot = pre_filled.get("shot")
+                camera = pre_filled.get("camera")
+                if shot:
+                    prefill["shot_type"] = shot
+                if camera:
+                    prefill["camera_motion"] = camera
+                if prefill:
+                    self._metadata_bar.set_prefilled_metadata(prefill)
+                    self._store.save_frame_metadata(filename, **prefill)
+                    for k, v in prefill.items():
+                        self._current_frame.metadata[k] = v
+
+        # Update video time display in stats bar
+        if self._is_bundle and self._stats_bar:
+            video_time = self._bundle_frame_metadata.get(filename, {}).get("video_time")
+            if video_time is not None:
+                self._stats_bar.set_video_time(
+                    FileManager.format_video_time(video_time)
+                )
+            else:
+                self._stats_bar.set_video_time("")
 
         # Update filmstrip selection
         self._filmstrip.select_row(row)

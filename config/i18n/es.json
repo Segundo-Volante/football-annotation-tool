@@ -169,6 +169,12 @@
   "meta.opt.motion_blur": "Desenfoque",
   "meta.opt.overlay_heavy": "Overlay pesado",
 
+  "session.venue_label": "Sede del partido",
+  "session.venue_home": "Local",
+  "session.venue_away": "Visitante",
+  "session.venue_neutral": "Neutral",
+  "session.venue_auto_detected": "Detectado automáticamente de los datos del partido",
+
   "session.annotation_mode_label": "Modo de Anotación",
   "session.mode_manual": "Manual",
   "session.mode_ai_assisted": "Asistido por IA",

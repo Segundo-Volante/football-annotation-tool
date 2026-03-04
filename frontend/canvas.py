@@ -832,9 +832,32 @@ class AnnotationCanvas(QWidget):
 
         source_rect = QRect(int(src_x), int(src_y), int(src_w), int(src_h))
 
-        # Target rect in bottom-right corner of widget
-        tx = self.width() - panel_size - margin
-        ty = self.height() - panel_size - margin
+        # Choose panel corner to avoid overlapping the selected box.
+        # Convert box center to screen coordinates.
+        box_screen_cx = (src_cx * self._base_scale * self._zoom_level
+                         + self._offset_x + self._pan_x)
+        box_screen_cy = (src_cy * self._base_scale * self._zoom_level
+                         + self._offset_y + self._pan_y)
+        mid_x = self.width() / 2
+        mid_y = self.height() / 2
+
+        # Place panel in the quadrant opposite the box
+        if box_screen_cx > mid_x and box_screen_cy > mid_y:
+            # Box in bottom-right → panel in top-left
+            tx = margin
+            ty = margin
+        elif box_screen_cx <= mid_x and box_screen_cy > mid_y:
+            # Box in bottom-left → panel in top-right
+            tx = self.width() - panel_size - margin
+            ty = margin
+        elif box_screen_cx > mid_x and box_screen_cy <= mid_y:
+            # Box in top-right → panel in bottom-left
+            tx = margin
+            ty = self.height() - panel_size - margin
+        else:
+            # Box in top-left → panel in bottom-right (default)
+            tx = self.width() - panel_size - margin
+            ty = self.height() - panel_size - margin
         target_rect = QRect(tx, ty, panel_size, panel_size)
 
         # Drop shadow

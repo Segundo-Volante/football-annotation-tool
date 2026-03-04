@@ -43,12 +43,14 @@ def _extract_lastname(full_name: str) -> str:
 class Exporter:
     def __init__(self, store: AnnotationStore, input_folder: str | Path,
                  output_folder: str | Path, team_name: str = "Home Team",
-                 has_opponent_roster: bool = False):
+                 has_opponent_roster: bool = False,
+                 session_meta: Optional[dict] = None):
         self.store = store
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
         self._team_name = team_name
         self._has_opponent_roster = has_opponent_roster
+        self._session_meta = session_meta or {}
         self._meta_config = _load_metadata_config()
         # Create two-folder output structure
         self._complete_dir = self.output_folder / "complete"
@@ -214,7 +216,13 @@ class Exporter:
         if dataset_path.exists():
             dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
         else:
+            info = {"description": "Football annotation export"}
+            if self._session_meta:
+                for k in ("venue", "opponent", "weather", "lighting", "source", "match_round"):
+                    if self._session_meta.get(k):
+                        info[k] = self._session_meta[k]
             dataset = {
+                "info": info,
                 "images": [],
                 "annotations": [],
                 "categories": [
