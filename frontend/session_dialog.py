@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from backend.model_manager import AI_AVAILABLE
-except ImportError:
+except (ImportError, OSError):
     AI_AVAILABLE = False
 
 from backend.i18n import I18n, t
@@ -40,26 +40,34 @@ class SessionDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("session.window_title"))
         self.setFixedWidth(920)
-        self.setStyleSheet("""
-            QDialog { background: #1E1E2E; }
-            QLabel { color: #E8E8F0; font-size: 12px; }
-            QLineEdit, QComboBox {
+        import platform as _plat
+        _is_win = _plat.system() == "Windows"
+        _radio_style = (
+            "QRadioButton { color: #E8E8F0; font-size: 11px; spacing: 8px; min-height: 28px; padding: 4px; }\n"
+            "QRadioButton:checked { color: #FF4444; font-weight: bold; }"
+            if _is_win else
+            "QRadioButton { color: #E8E8F0; font-size: 11px; spacing: 6px; }\n"
+            "QRadioButton::indicator { width: 14px; height: 14px; }"
+        )
+        self.setStyleSheet(f"""
+            QDialog {{ background: #1E1E2E; }}
+            QLabel {{ color: #E8E8F0; font-size: 12px; }}
+            QLineEdit, QComboBox {{
                 background: #2A2A3C; color: #E8E8F0; border: 1px solid #404060;
                 border-radius: 4px; padding: 6px; font-size: 12px;
-            }
-            QLineEdit:focus, QComboBox:focus { border-color: #F5A623; }
-            QPushButton {
+            }}
+            QLineEdit:focus, QComboBox:focus {{ border-color: #F5A623; }}
+            QPushButton {{
                 background: #404060; color: #E8E8F0; padding: 8px 16px;
                 border-radius: 4px; font-size: 12px; border: none;
-            }
-            QPushButton:hover { background: #505070; }
-            QGroupBox {
+            }}
+            QPushButton:hover {{ background: #505070; }}
+            QGroupBox {{
                 color: #8888A0; font-size: 11px; border: 1px solid #404060;
                 border-radius: 6px; margin-top: 8px; padding-top: 16px;
-            }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
-            QRadioButton { color: #E8E8F0; font-size: 11px; spacing: 6px; }
-            QRadioButton::indicator { width: 14px; height: 14px; }
+            }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
+            {_radio_style}
         """)
 
         # Load metadata options

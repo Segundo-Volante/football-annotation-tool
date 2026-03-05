@@ -105,7 +105,7 @@ def test_export_frame(export_env):
     json_name = exported_name.replace(".png", ".json")
     json_path = os.path.join(complete_dir, "annotations", json_name)
     assert os.path.exists(json_path)
-    with open(json_path) as f:
+    with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
     assert len(data["annotations"]) == 3
     assert data["annotations"][0]["category_name"] == "home_player"
@@ -227,7 +227,7 @@ def test_unsure_export_to_needs_review():
         json_name = exported.replace(".png", ".json")
         json_path = os.path.join(review_dir, "annotations", json_name)
         assert os.path.exists(json_path)
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
         assert len(data["annotations"]) == 2
         # Check box_status and unsure_note in COCO JSON
@@ -247,7 +247,7 @@ def test_unsure_export_to_needs_review():
         # Review manifest
         manifest_path = os.path.join(review_dir, "review_manifest.json")
         assert os.path.exists(manifest_path)
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
         assert len(manifest["frames_needing_review"]) == 1
         entry = manifest["frames_needing_review"][0]

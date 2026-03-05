@@ -179,8 +179,17 @@ class MainWindow(QMainWindow):
         I18n.load(lang, config_dir)
 
         self.setWindowTitle(t("main.window_title"))
-        self.setMinimumSize(1200, 700)
-        self.resize(1600, 900)
+        # Adapt window size to screen — works across different displays/DPI
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableSize()
+            w = max(1200, int(avail.width() * 0.82))
+            h = max(700, int(avail.height() * 0.85))
+            self.setMinimumSize(min(1200, avail.width()), min(700, avail.height()))
+            self.resize(min(w, avail.width()), min(h, avail.height()))
+        else:
+            self.setMinimumSize(1200, 700)
+            self.resize(1600, 900)
         self.setStyleSheet("background: #1E1E1E;")
 
         # Backend — per-frame JSON store + local state DB

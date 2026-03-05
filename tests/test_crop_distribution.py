@@ -499,7 +499,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         assert "generated_at" in request
         assert "source_bundle" in request
@@ -516,7 +516,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         target_names = {
             t["target_player"]["name"] for t in request["resample_targets"]
@@ -534,7 +534,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         assert len(request["resample_targets"]) > 0
         seq = request["resample_targets"][0]["sequences"][0]
@@ -554,7 +554,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         mi = request["match_info"]
         assert mi["match_id"] == "match_test_001"
@@ -567,7 +567,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         summary = request["summary"]
         assert summary["total_players_with_gaps"] > 0
@@ -594,7 +594,7 @@ class TestCD005_ResampleRequestGeneration:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         for target in request["resample_targets"]:
             tp = target["target_player"]
@@ -621,7 +621,7 @@ class TestCD006_ResampleSelectionFiltering:
         result_path = env["exporter"].generate_resample_request(
             dist, DEFAULT_TARGETS, DEFAULT_THRESHOLDS,
         )
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
 
         # Find Messi's target entry
@@ -677,7 +677,7 @@ class TestCD006_ResampleSelectionFiltering:
             dist, DEFAULT_TARGETS, relaxed_thresholds,
         )
         assert result_path is not None
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8") as f:
             request = json.load(f)
         # With relaxed thresholds, we expect more targets and sequences
         total_seqs = sum(
@@ -877,7 +877,7 @@ class TestCD007_MinSequenceLengthFilter:
             assert result_path is not None, (
                 "Sequence with 10 frames should pass min_sequence_length=3"
             )
-            with open(result_path) as f:
+            with open(result_path, encoding="utf-8") as f:
                 request = json.load(f)
             assert len(request["resample_targets"]) >= 1
 
@@ -902,7 +902,7 @@ class TestCD008_ExportWithoutResample:
         env = crop_dist_env
         dist = env["exporter"].generate_crop_distribution(DEFAULT_TARGETS)
         dist_path = os.path.join(env["output_dir"], "crop_distribution.json")
-        with open(dist_path) as f:
+        with open(dist_path, encoding="utf-8") as f:
             written = json.load(f)
         # Compare key structural elements (generated_at may differ slightly)
         assert written["match_id"] == dist["match_id"]

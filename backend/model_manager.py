@@ -7,6 +7,7 @@ Supports two model families:
 This module is optional; the app works without it when ultralytics is not installed.
 """
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -15,10 +16,17 @@ logger = logging.getLogger(__name__)
 try:
     from ultralytics import YOLO
     AI_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as _e:
+    logger.warning("AI not available: %s", _e)
     AI_AVAILABLE = False
 
-MODELS_CACHE_DIR = Path.home() / ".cache" / "football-annotation-tool" / "models"
+import platform as _platform
+
+if _platform.system() == "Windows":
+    _cache_base = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cache"))
+else:
+    _cache_base = Path.home() / ".cache"
+MODELS_CACHE_DIR = _cache_base / "football-annotation-tool" / "models"
 
 # ── Model registry ──
 

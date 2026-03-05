@@ -144,7 +144,7 @@ def test_save_reid_settings_no_existing_data():
         project_path = os.path.join(tmpdir, "project.json")
         assert os.path.exists(project_path)
 
-        with open(project_path, "r") as f:
+        with open(project_path, "r", encoding="utf-8") as f:
             saved = json.load(f)
 
         assert saved["reid_targets"] == new_targets

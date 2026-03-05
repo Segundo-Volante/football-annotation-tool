@@ -88,7 +88,7 @@ def test_load_squad_json_empty_teams():
     """Test loading squad.json with empty/missing teams."""
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "squad.json")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"home_team": {"name": "Test", "players": []}}, f)
 
         squad = load_squad_json(path)
@@ -114,7 +114,7 @@ def test_squad_from_roster():
     """Test converting a CSV RosterManager to SquadData."""
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = os.path.join(tmpdir, "roster.csv")
-        with open(csv_path, "w") as f:
+        with open(csv_path, "w", encoding="utf-8") as f:
             f.write("team,season,number,name\n")
             f.write("TestTeam,2024-25,7,Griezmann\n")
             f.write("TestTeam,2024-25,19,Álvarez\n")
@@ -134,7 +134,7 @@ def test_squad_from_roster_away():
     """Test converting roster as away team."""
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = os.path.join(tmpdir, "roster.csv")
-        with open(csv_path, "w") as f:
+        with open(csv_path, "w", encoding="utf-8") as f:
             f.write("team,season,number,name\n")
             f.write("AwayTeam,2024-25,1,Soria\n")
 

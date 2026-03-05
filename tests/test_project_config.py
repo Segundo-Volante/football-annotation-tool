@@ -34,7 +34,7 @@ def config_dir():
 
         # Create home.json with roster pointing to a CSV
         roster_csv = os.path.join(tmpdir, "roster.csv")
-        with open(roster_csv, "w") as f:
+        with open(roster_csv, "w", encoding="utf-8") as f:
             f.write("team,season,number,name\nTest FC,2024-25,9,Test Player\n")
         home = {"team_name": "Test FC", "roster_csv": "../roster.csv"}
         with open(os.path.join(teams_dir, "home.json"), "w") as f:
@@ -42,7 +42,7 @@ def config_dir():
 
         # Create an opponent CSV
         opp_csv = os.path.join(teams_dir, "opponents", "Real_Madrid.csv")
-        with open(opp_csv, "w") as f:
+        with open(opp_csv, "w", encoding="utf-8") as f:
             f.write("team,season,number,name\nReal Madrid,2024-25,7,Vinicius Jr\n")
 
         yield tmpdir

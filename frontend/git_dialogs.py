@@ -1259,7 +1259,7 @@ class GitSettingsDialog(QDialog):
                 )
             elif system == "Windows":
                 subprocess.Popen(
-                    ["cmd", "/c", "start", "cmd", "/k", f"cd /d {self._project_path}"],
+                    ["cmd", "/c", "start", "cmd", "/k", f'cd /d "{self._project_path}"'],
                     start_new_session=True,
                 )
             else:

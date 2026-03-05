@@ -140,7 +140,12 @@ class AnnotationStore:
     def _atomic_write(self, path: Path, data: dict) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(str(tmp), str(path))
+        try:
+            os.replace(str(tmp), str(path))
+        except PermissionError:
+            # Windows: target may be locked by antivirus/cloud sync; fall back
+            import shutil
+            shutil.move(str(tmp), str(path))
 
     # -- Frame-level operations ---------------------------------------------
 

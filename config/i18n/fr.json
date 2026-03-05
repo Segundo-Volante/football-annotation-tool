@@ -178,7 +178,7 @@
   "session.annotation_mode_label": "Mode d'Annotation",
   "session.mode_manual": "Manuel",
   "session.mode_ai_assisted": "Assisté par IA",
-  "session.ai_unavailable_tooltip": "Installez ultralytics pour activer le mode IA",
+  "session.ai_unavailable_tooltip": "Mode IA indisponible — installez torch et ultralytics :\npip install torch ultralytics",
   "session.model_label": "Modèle de Détection",
   "session.confidence_label": "Seuil de Confiance",
   "session.custom_model_placeholder": "Sélectionner un fichier .pt personnalisé...",

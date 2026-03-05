@@ -178,7 +178,7 @@
   "session.annotation_mode_label": "Annotationsmodus",
   "session.mode_manual": "Manuell",
   "session.mode_ai_assisted": "KI-gestützt",
-  "session.ai_unavailable_tooltip": "Installiere ultralytics für KI-Modus",
+  "session.ai_unavailable_tooltip": "KI-Modus nicht verfügbar — installiere torch und ultralytics:\npip install torch ultralytics",
   "session.model_label": "Erkennungsmodell",
   "session.confidence_label": "Konfidenzschwelle",
   "session.custom_model_placeholder": "Benutzerdefinierte .pt-Datei auswählen...",
