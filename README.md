@@ -7,6 +7,7 @@ A keyboard-driven PyQt6 desktop application for annotating football broadcast fr
 ![Tests](https://img.shields.io/badge/Tests-369_passing-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
+![Football Annotation Tool Demo](demo_pic/demo.png)
 
 > I just wanted to create something that lets more people who are truly passionate about football AI focus on what matters, without getting stuck in tedious technical details. You can annotate your data quickly and jump straight into building models.
 >
